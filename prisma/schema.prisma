@@ -1,0 +1,747 @@
+// Esquema de dados — Gestão de Centros de Formação (Fase 1: núcleo operacional)
+//
+// Convenções:
+// - Todas as tabelas de negócio têm `tenantId` (multi-tenant em BD partilhada).
+// - Valores monetários em AOA guardados em cêntimos (BigInt). Nunca usar float.
+// - Datas/horas em UTC (timestamptz); apresentação em Africa/Luanda.
+// - Conflitos de agenda são garantidos por exclusion constraints (ver migração SQL).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────── Enumerações ───────────────────────────────
+
+enum Perfil {
+  ADMIN
+  COMERCIAL
+  PEDAGOGICO
+  FINANCEIRO
+}
+
+enum CategoriaFormacao {
+  COMPORTAMENTAL
+  TECNICA
+}
+
+enum EstadoTurma {
+  PLANEADA
+  EM_CURSO
+  CONCLUIDA
+  CANCELADA
+}
+
+enum EstadoSessao {
+  AGENDADA
+  REALIZADA
+  CANCELADA
+}
+
+enum EstadoMatricula {
+  ATIVA
+  CONCLUIDA
+  CANCELADA
+}
+
+enum MetodoPagamento {
+  MULTICAIXA
+  REFERENCIA
+  TRANSFERENCIA
+  NUMERARIO
+  TPA
+  OUTRO
+}
+
+enum FormaPagamento {
+  PRONTO
+  PARCELADO
+}
+
+// ─────────────────────────────── Plataforma ────────────────────────────────
+
+model Tenant {
+  id        String   @id @default(cuid())
+  nome      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+
+  utilizadores User[]
+  formadores   Formador[]
+  formandos    Formando[]
+  formacoes    Formacao[]
+  salas        Sala[]
+  turmas       Turma[]
+  sessoes      Sessao[]
+  matriculas   Matricula[]
+  parcelas     Parcela[]
+  pagamentos   Pagamento[]
+  areas        Area[]
+  competencias Competencia[]
+  avaliacoes       AvaliacaoFormador[]
+  precos           PrecoFormadorFormacao[]
+  auditoria        AuditLog[]
+  configuracao     ConfiguracaoCentro?
+  modelos          ModeloMensagem[]
+  mensagens        Mensagem[]
+  leads            Lead[]
+  movimentosPontos MovimentoPontos[]
+  campanhas        Campanha[]
+  despesas         Despesa[]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  tenantId     String
+  nome         String
+  email        String   @unique
+  passwordHash String
+  perfil       Perfil
+  ativo        Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant     Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sessoes    UserSession[]
+  pagamentos Pagamento[]
+  despesas   Despesa[]
+
+  @@index([tenantId])
+}
+
+model UserSession {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  tenantId   String
+  userId     String?
+  entidade   String
+  entidadeId String?
+  acao       String
+  dados      Json?
+  createdAt  DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, entidade, entidadeId])
+  @@index([tenantId, createdAt])
+}
+
+// ─────────────────────────────── 4.1 Formadores ────────────────────────────
+
+model Area {
+  id       String @id @default(cuid())
+  tenantId String
+  nome     String
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  competencias Competencia[]
+  formadores   Formador[]
+
+  @@unique([tenantId, nome])
+}
+
+model Competencia {
+  id       String  @id @default(cuid())
+  tenantId String
+  nome     String
+  areaId   String?
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  area       Area?      @relation(fields: [areaId], references: [id], onDelete: SetNull)
+  formadores Formador[]
+
+  @@unique([tenantId, nome])
+}
+
+model Formador {
+  id       String  @id @default(cuid())
+  tenantId String
+  nome     String
+  email    String?
+  telefone String?
+  ativo    Boolean @default(true)
+  notas    String?
+
+  /// Valor/hora (cêntimos AOA) por categoria de formação
+  precoHoraComportamental BigInt?
+  precoHoraTecnica        BigInt?
+
+  /// Token secreto de acesso ao Portal do Formador (/portal/formador/<token>)
+  portalToken String @unique @default(cuid())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant       Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  areas        Area[]
+  competencias Competencia[]
+  precos       PrecoFormadorFormacao[]
+  avaliacoes   AvaliacaoFormador[]
+  sessoes      Sessao[]
+  despesas     Despesa[]
+
+  @@index([tenantId, nome])
+}
+
+/// Sobreposição do valor/hora de um formador para uma formação específica
+model PrecoFormadorFormacao {
+  id         String @id @default(cuid())
+  tenantId   String
+  formadorId String
+  formacaoId String
+  precoHora  BigInt
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  formador Formador @relation(fields: [formadorId], references: [id], onDelete: Cascade)
+  formacao Formacao @relation(fields: [formacaoId], references: [id], onDelete: Cascade)
+
+  @@unique([formadorId, formacaoId])
+}
+
+/// Avaliação 1–5 nos cinco critérios do briefing
+model AvaliacaoFormador {
+  id                      String   @id @default(cuid())
+  tenantId                String
+  formadorId              String
+  turmaId                 String?
+  dominioConteudo         Int
+  eticaProfissional       Int
+  cumprimentoHorarios     Int
+  enquadramentoExercicios Int
+  capacidadeMotivar       Int
+  comentario              String?
+  avaliadoPor             String?
+  createdAt               DateTime @default(now())
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  formador Formador @relation(fields: [formadorId], references: [id], onDelete: Cascade)
+  turma    Turma?   @relation(fields: [turmaId], references: [id], onDelete: SetNull)
+
+  @@index([formadorId])
+}
+
+// ─────────────────────────────── 4.5 Formações e agenda ────────────────────
+
+model Formacao {
+  id           String            @id @default(cuid())
+  tenantId     String
+  nome         String
+  slug         String
+  descricao    String?
+  cargaHoraria Int
+  /// Preço de venda (cêntimos AOA)
+  preco        BigInt
+  categoria    CategoriaFormacao
+  ativa        Boolean           @default(true)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  tenant    Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  turmas    Turma[]
+  precos    PrecoFormadorFormacao[]
+  leads     Lead[]
+  campanhas Campanha[]
+  despesas  Despesa[]
+
+  @@unique([tenantId, slug])
+}
+
+model Sala {
+  id         String  @id @default(cuid())
+  tenantId   String
+  nome       String
+  capacidade Int?
+  ativa      Boolean @default(true)
+
+  tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sessoes Sessao[]
+
+  @@unique([tenantId, nome])
+}
+
+model Turma {
+  id         String      @id @default(cuid())
+  tenantId   String
+  formacaoId String
+  codigo     String
+  vagas      Int?
+  /// Preço específico desta edição (cêntimos); se nulo usa o preço da formação
+  preco      BigInt?
+  estado     EstadoTurma @default(PLANEADA)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  tenant     Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  formacao   Formacao            @relation(fields: [formacaoId], references: [id], onDelete: Restrict)
+  sessoes    Sessao[]
+  matriculas Matricula[]
+  avaliacoes AvaliacaoFormador[]
+  leads      Lead[]
+  despesas   Despesa[]
+
+  @@unique([tenantId, codigo])
+}
+
+model Sessao {
+  id              String       @id @default(cuid())
+  tenantId        String
+  turmaId         String
+  formadorId      String
+  salaId          String
+  inicio          DateTime     @db.Timestamptz(3)
+  fim             DateTime     @db.Timestamptz(3)
+  estado          EstadoSessao @default(AGENDADA)
+  /// Horas efetivamente lecionadas (confirmadas); base do pagamento ao formador
+  horasLecionadas Decimal?     @db.Decimal(5, 2)
+  notas           String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  turma    Turma    @relation(fields: [turmaId], references: [id], onDelete: Cascade)
+  formador Formador @relation(fields: [formadorId], references: [id], onDelete: Restrict)
+  sala     Sala     @relation(fields: [salaId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, inicio])
+  @@index([turmaId])
+  @@index([formadorId])
+  @@index([salaId])
+}
+
+// ─────────────────────────────── 4.2 Formandos ─────────────────────────────
+
+model Formando {
+  id                      String          @id @default(cuid())
+  tenantId                String
+  nome                    String
+  profissao               String?
+  /// Número de WhatsApp em formato internacional (ex.: +244923000000)
+  whatsapp                String
+  email                   String?
+  dataNascimento          DateTime?       @db.Date
+  intencaoCompra          Boolean         @default(false)
+  formaPagamentoPreferida FormaPagamento?
+  /// Avaliação comercial da equipa (1–5), entra no cálculo do nível de interesse
+  avaliacaoEquipa         Int?
+  notas                   String?
+  /// Programa de indicação: formando que indicou este formando
+  indicadoPorId           String?
+  /// Token secreto de acesso ao Portal do Formando (/portal/formando/<token>)
+  portalToken             String          @unique @default(cuid())
+  createdAt               DateTime        @default(now())
+  updatedAt               DateTime        @updatedAt
+
+  tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  indicadoPor      Formando?         @relation("IndicacoesFormando", fields: [indicadoPorId], references: [id], onDelete: SetNull)
+  indicados        Formando[]        @relation("IndicacoesFormando")
+  matriculas       Matricula[]
+  pagamentos       Pagamento[]
+  mensagens        Mensagem[]
+  leads            Lead[]
+  movimentosPontos MovimentoPontos[] @relation("PontosFormando")
+  pontosGerados    MovimentoPontos[] @relation("PontosPorIndicado")
+
+  @@unique([tenantId, whatsapp])
+  @@index([tenantId, nome])
+  @@index([indicadoPorId])
+}
+
+// ─────────────────────────────── 4.3 Matrículas e parcelas ─────────────────
+
+model Matricula {
+  id               String          @id @default(cuid())
+  tenantId         String
+  formandoId       String
+  turmaId          String
+  /// Valor total após desconto (cêntimos)
+  valorTotal       BigInt
+  desconto         BigInt          @default(0)
+  numParcelas      Int
+  estado           EstadoMatricula @default(ATIVA)
+  /// Campanha associada (para medir conversões e consumo do orçamento)
+  campanhaId       String?
+  /// Pontos de indicação resgatados nesta matrícula
+  pontosResgatados Int             @default(0)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  formando         Formando          @relation(fields: [formandoId], references: [id], onDelete: Restrict)
+  turma            Turma             @relation(fields: [turmaId], references: [id], onDelete: Restrict)
+  campanha         Campanha?         @relation(fields: [campanhaId], references: [id], onDelete: SetNull)
+  parcelas         Parcela[]
+  pagamentos       Pagamento[]
+  movimentosPontos MovimentoPontos[]
+
+  @@unique([formandoId, turmaId])
+  @@index([tenantId])
+  @@index([campanhaId])
+}
+
+model Parcela {
+  id          String   @id @default(cuid())
+  tenantId    String
+  matriculaId String
+  numero      Int
+  valor       BigInt
+  vencimento  DateTime @db.Date
+
+  tenant    Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  matricula Matricula           @relation(fields: [matriculaId], references: [id], onDelete: Cascade)
+  alocacoes AlocacaoPagamento[]
+
+  @@unique([matriculaId, numero])
+  @@index([tenantId, vencimento])
+}
+
+model Pagamento {
+  id               String          @id @default(cuid())
+  tenantId         String
+  formandoId       String
+  matriculaId      String
+  valor            BigInt
+  metodo           MetodoPagamento
+  dataPagamento    DateTime        @db.Date
+  /// Referência do pagamento (ex.: n.º de transação Multicaixa)
+  referencia       String?
+  /// Referência do recibo emitido no software certificado AGT
+  referenciaRecibo String?
+  notas            String?
+  registadoPorId   String?
+  createdAt        DateTime        @default(now())
+
+  tenant       Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  formando     Formando            @relation(fields: [formandoId], references: [id], onDelete: Restrict)
+  matricula    Matricula           @relation(fields: [matriculaId], references: [id], onDelete: Restrict)
+  registadoPor User?               @relation(fields: [registadoPorId], references: [id], onDelete: SetNull)
+  alocacoes    AlocacaoPagamento[]
+
+  @@index([tenantId, dataPagamento])
+  @@index([formandoId])
+}
+
+/// Quanto de um pagamento abate cada parcela (permite pagamentos parciais ou de várias parcelas)
+model AlocacaoPagamento {
+  id          String @id @default(cuid())
+  pagamentoId String
+  parcelaId   String
+  valor       BigInt
+
+  pagamento Pagamento @relation(fields: [pagamentoId], references: [id], onDelete: Cascade)
+  parcela   Parcela   @relation(fields: [parcelaId], references: [id], onDelete: Cascade)
+
+  @@index([parcelaId])
+}
+
+// ═══════════════════════════════ FASE 2 ═══════════════════════════════════
+// Automação (WhatsApp via Evolution API) e captação de leads.
+
+enum ModoWhatsapp {
+  /// Não envia nem enfileira mensagens automáticas
+  DESATIVADO
+  /// Regista as mensagens como enviadas sem contactar a Evolution API (testes/formação)
+  SIMULACAO
+  /// Envia através da Evolution API
+  EVOLUTION
+}
+
+enum TipoMensagem {
+  LEMBRETE_VENCIMENTO
+  PARCELA_ATRASO
+  CONFIRMACAO_PAGAMENTO
+  PLANO_CONCLUIDO
+  ANIVERSARIO
+  NOVO_LEAD
+  CAMPANHA
+  MANUAL
+  TESTE
+}
+
+enum EstadoMensagem {
+  PENDENTE
+  ENVIANDO
+  ENVIADA
+  ENTREGUE
+  LIDA
+  FALHADA
+  CANCELADA
+}
+
+enum EstadoLead {
+  NOVO
+  CONTACTADO
+  CONVERTIDO
+  PERDIDO
+}
+
+/// Configuração de automações e integrações de cada centro (1:1 com Tenant)
+model ConfiguracaoCentro {
+  tenantId String @id
+
+  whatsappModo           ModoWhatsapp @default(SIMULACAO)
+  evolutionUrl           String?
+  /// Cifrada com APP_SECRET (ver src/lib/segredos.ts)
+  evolutionApiKey        String?
+  evolutionInstancia     String?
+  /// Segredo do URL de webhook (/api/webhooks/evolution/<token>)
+  webhookToken           String       @unique @default(cuid())
+  /// Intervalo mínimo entre envios do mesmo centro (reduz risco de bloqueio do número)
+  intervaloEnvioSegundos Int          @default(5)
+
+  lembretesAtivos     Boolean @default(true)
+  diasAntesVencimento Int     @default(3)
+  /// Dias após o vencimento em que se envia aviso de atraso (ex.: 1 e 7)
+  diasAposAtraso      Int[]   @default([1, 7])
+  confirmacoesAtivas  Boolean @default(true)
+  aniversariosAtivos  Boolean @default(true)
+  /// Hora local (0–23) a partir da qual se enviam as mensagens agendadas
+  horaEnvio           Int     @default(9)
+
+  /// Números WhatsApp da equipa comercial que recebem os leads qualificados
+  numerosEquipaComercial String[] @default([])
+
+  /// Texto de apresentação nas landing pages públicas
+  apresentacaoPublica String?
+
+  /// Fase 3: Fidelização e Programa de Indicação (editáveis pelo gestor)
+  descontoFidelizacaoPct     Int @default(5)
+  pontosPorIndicacao         Int @default(5)
+  percentagemPorPonto        Int @default(1)
+  limiteDescontoIndicacaoPct Int @default(20)
+  validadePontosMeses        Int @default(12)
+
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+/// Texto personalizado de cada tipo de mensagem (sem registo → usa o texto padrão)
+model ModeloMensagem {
+  id       String       @id @default(cuid())
+  tenantId String
+  tipo     TipoMensagem
+  texto    String
+  ativo    Boolean      @default(true)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, tipo])
+}
+
+/// Fila de saída (outbox) e histórico de todas as mensagens
+model Mensagem {
+  id               String         @id @default(cuid())
+  tenantId         String
+  tipo             TipoMensagem
+  /// Número de destino em formato internacional (+244…)
+  destino          String
+  texto            String
+  estado           EstadoMensagem @default(PENDENTE)
+  /// Chave de idempotência: impede enviar duas vezes o mesmo lembrete
+  chave            String?
+  tentativas       Int            @default(0)
+  proximaTentativa DateTime       @default(now())
+  erro             String?
+  idExterno        String?
+  enviadaEm        DateTime?
+  entregueEm       DateTime?
+  lidaEm           DateTime?
+
+  formandoId  String?
+  leadId      String?
+  matriculaId String?
+  parcelaId   String?
+  pagamentoId String?
+  campanhaId  String?
+  criadaPorId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  formando Formando? @relation(fields: [formandoId], references: [id], onDelete: SetNull)
+  lead     Lead?     @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  campanha Campanha? @relation(fields: [campanhaId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, chave])
+  @@index([estado, proximaTentativa])
+  @@index([tenantId, createdAt])
+  @@index([formandoId])
+  @@index([campanhaId])
+  @@index([idExterno])
+}
+
+/// Contacto captado pela landing page, já qualificado (aceitou preço e datas)
+model Lead {
+  id               String     @id @default(cuid())
+  tenantId         String
+  nome             String
+  whatsapp         String
+  email            String?
+  profissao        String?
+  formacaoId       String
+  turmaId          String?
+  /// Preço mostrado no momento do pré-cadastro (cêntimos)
+  precoApresentado BigInt
+  aceitouPreco     Boolean
+  aceitouDatas     Boolean
+  estado           EstadoLead @default(NOVO)
+
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+  utmContent  String?
+  utmTerm     String?
+  fbclid      String?
+  referrer    String?
+  ipHash      String?
+
+  notas        String?
+  formandoId   String?
+  contactadoEm DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  formacao  Formacao   @relation(fields: [formacaoId], references: [id], onDelete: Restrict)
+  turma     Turma?     @relation(fields: [turmaId], references: [id], onDelete: SetNull)
+  formando  Formando?  @relation(fields: [formandoId], references: [id], onDelete: SetNull)
+  mensagens Mensagem[]
+
+  @@index([tenantId, estado, createdAt])
+  @@index([tenantId, whatsapp])
+  @@index([ipHash, createdAt])
+}
+
+// ═══════════════════════════════ FASE 3 ═══════════════════════════════════
+// Crescimento e controlo: retenção, campanhas, programa de indicação e finanças.
+
+enum TipoCampanha {
+  SAZONAL
+  FIDELIZACAO
+  SEGMENTADA
+}
+
+enum EstadoCampanha {
+  RASCUNHO
+  ATIVA
+  ENVIADA
+  ENCERRADA
+}
+
+enum CategoriaDespesa {
+  FORMADOR
+  SALARIOS
+  CONSUMIVEIS
+  MANUTENCAO
+  INSTALACOES
+  MARKETING
+  OUTROS
+}
+
+/// Registo de pontos ganhos por indicação ou resgatados como desconto em matrículas
+model MovimentoPontos {
+  id          String    @id @default(cuid())
+  tenantId    String
+  formandoId  String
+  /// Positivo = ganho por indicação; Negativo = resgate em matrícula
+  pontos      Int
+  motivo      String
+  indicadoId  String?
+  matriculaId String?
+  expiraEm    DateTime?
+  createdAt   DateTime  @default(now())
+
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  formando  Formando   @relation("PontosFormando", fields: [formandoId], references: [id], onDelete: Cascade)
+  indicado  Formando?  @relation("PontosPorIndicado", fields: [indicadoId], references: [id], onDelete: SetNull)
+  matricula Matricula? @relation(fields: [matriculaId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, formandoId, indicadoId])
+  @@index([tenantId, formandoId, createdAt])
+}
+
+/// Campanhas sazonais (até 20% no mês), de fidelização e segmentadas por WhatsApp
+model Campanha {
+  id                  String         @id @default(cuid())
+  tenantId            String
+  nome                String
+  tipo                TipoCampanha
+  estado              EstadoCampanha @default(RASCUNHO)
+  /// Percentagem de desconto (0–20 nas sazonais)
+  descontoPct         Int            @default(0)
+  /// Mês (1–12) e ano em que a campanha sazonal é válida
+  mesValidade         Int?
+  anoValidade         Int?
+  /// Orçamento máximo de descontos/custo da campanha (cêntimos AOA)
+  orcamentoMax        BigInt?
+  formacaoId          String?
+  /// Filtros de segmentação dos destinatários
+  filtroNivelInteresse String?
+  filtroMinFormacoes   Int?
+  filtroMaxFormacoes   Int?
+  filtroProfissao      String?
+  filtroIntencaoCompra Boolean?
+  /// Texto enviado por WhatsApp aos formandos do segmento
+  mensagemTexto       String
+  totalDestinatarios  Int            @default(0)
+  enviadaEm           DateTime?
+  criadaPorId         String?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  formacao   Formacao?   @relation(fields: [formacaoId], references: [id], onDelete: SetNull)
+  matriculas Matricula[]
+  mensagens  Mensagem[]
+
+  @@index([tenantId, estado, createdAt])
+  @@index([tenantId, mesValidade, anoValidade])
+}
+
+/// Despesas e saídas operacionais do centro (secção 4.7)
+model Despesa {
+  id             String           @id @default(cuid())
+  tenantId       String
+  categoria      CategoriaDespesa
+  descricao      String
+  /// Valor em cêntimos AOA (> 0)
+  valor          BigInt
+  data           DateTime         @db.Date
+  fornecedor     String?
+  metodo         MetodoPagamento  @default(TRANSFERENCIA)
+  referencia     String?
+  formacaoId     String?
+  turmaId        String?
+  formadorId     String?
+  horasPagas     Decimal?         @db.Decimal(6, 2)
+  notas          String?
+  registadoPorId String?
+  createdAt      DateTime         @default(now())
+
+  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  formacao     Formacao? @relation(fields: [formacaoId], references: [id], onDelete: SetNull)
+  turma        Turma?    @relation(fields: [turmaId], references: [id], onDelete: SetNull)
+  formador     Formador? @relation(fields: [formadorId], references: [id], onDelete: SetNull)
+  registadoPor User?     @relation(fields: [registadoPorId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, data])
+  @@index([tenantId, categoria])
+  @@index([tenantId, formacaoId])
+  @@index([tenantId, formadorId])
+}
