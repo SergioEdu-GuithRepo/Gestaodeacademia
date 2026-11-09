@@ -1,8 +1,17 @@
-import { ArrowLeft, CalendarDays, Clock, GraduationCap, ShieldCheck } from "lucide-react";
+import {
+  ArrowLeft,
+  CalendarDays,
+  CheckCircle2,
+  Clock,
+  GraduationCap,
+  MessageCircle,
+  ShieldCheck,
+  Sparkles,
+} from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Badge, Card } from "@/components/ui";
+import { Badge, Card, CardHeader, LinkButton } from "@/components/ui";
 import { NOMES_CATEGORIA } from "@/lib/catalogo";
 import { formatDiaSemana, formatHora } from "@/lib/datas";
 import { dbTenant, prisma } from "@/lib/db";
@@ -70,7 +79,9 @@ export default async function LandingFormacaoPage({ params, searchParams }: Prop
     .map((t) => {
       const preco = t.preco ?? formacao.preco;
       const datas = resumoDatasTurma(t.sessoes);
-      const horarios = t.sessoes.slice(0, 6).map((s) => `${formatDiaSemana(s.inicio)} · ${formatHora(s.inicio)}–${formatHora(s.fim)}`);
+      const horarios = t.sessoes
+        .slice(0, 6)
+        .map((s) => `${formatDiaSemana(s.inicio)} · ${formatHora(s.inicio)}–${formatHora(s.fim)}`);
       if (t.sessoes.length > 6) horarios.push(`+${t.sessoes.length - 6} sessão(ões)`);
       const vagasRestantes = t.vagas !== null ? Math.max(0, t.vagas - t._count.matriculas) : null;
       return {
@@ -84,79 +95,131 @@ export default async function LandingFormacaoPage({ params, searchParams }: Prop
     });
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <header className="bg-gradient-to-br from-slate-900 via-marca-900 to-marca-700 text-white">
-        <div className="mx-auto max-w-4xl px-4 py-10 sm:px-6 sm:py-14">
+    <div className="min-h-dvh bg-[#F5F4EF] text-[#1C1D21]">
+      {/* Barra superior limpa */}
+      <nav className="sticky top-0 z-30 border-b border-zinc-200/70 bg-[#F5F4EF]/90 backdrop-blur-md">
+        <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 py-3.5 sm:px-8">
           <Link
             href={`/p/${tenant.slug}${sufixoUtm}`}
-            className="inline-flex items-center gap-1.5 text-sm text-marca-100 hover:text-white"
+            className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-xs font-semibold text-[#1C1D21] shadow-2xs ring-1 ring-zinc-200/80 transition-all hover:-translate-y-0.5 hover:bg-[#FAF9F5]"
           >
-            <ArrowLeft className="size-4" aria-hidden /> {tenant.nome} · Todas as formações
+            <ArrowLeft className="size-3.5" aria-hidden /> Voltar ao catálogo de {tenant.nome}
           </Link>
+          <Badge cor="azul">{NOMES_CATEGORIA[formacao.categoria]}</Badge>
+        </div>
+      </nav>
 
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            <Badge cor="azul">{NOMES_CATEGORIA[formacao.categoria]}</Badge>
-            <span className="inline-flex items-center gap-1 text-xs font-medium text-marca-100">
-              <Clock className="size-3.5" aria-hidden /> Carga horária: {formacao.cargaHoraria} horas
+      <main className="mx-auto max-w-5xl space-y-8 px-4 py-6 sm:px-8 sm:py-10">
+        {/* Cabeçalho Hero da Formação */}
+        <section className="anim-enter rounded-[2rem] border border-zinc-900/15 bg-[#1C1D21] p-6 text-white shadow-xl sm:p-10">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-[#FBD34D] px-3 py-1 text-xs font-bold text-[#1C1D21]">
+              <Sparkles className="size-3.5" aria-hidden /> {NOMES_CATEGORIA[formacao.categoria]}
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-medium text-zinc-200">
+              <Clock className="size-3.5 text-[#FBD34D]" aria-hidden /> Carga horária: {formacao.cargaHoraria} horas
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-medium text-zinc-200">
+              <GraduationCap className="size-3.5 text-[#FBD34D]" aria-hidden /> {tenant.nome}
             </span>
           </div>
 
-          <h1 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">{formacao.nome}</h1>
+          <h1 className="mt-4 text-3xl font-bold tracking-tight text-white sm:text-4xl">{formacao.nome}</h1>
           {formacao.descricao && (
-            <p className="mt-3 max-w-2xl text-base text-slate-200">{formacao.descricao}</p>
+            <p className="mt-3 max-w-3xl text-sm leading-relaxed text-zinc-300 sm:text-base">{formacao.descricao}</p>
           )}
-        </div>
-      </header>
+        </section>
 
-      <main className="mx-auto max-w-4xl px-4 py-10 sm:px-6">
         {opcoesTurmas.length === 0 ? (
-          <Card className="p-8 text-center">
-            <CalendarDays className="mx-auto mb-3 size-8 text-slate-400" aria-hidden />
-            <h2 className="text-lg font-semibold text-slate-900">Sem turmas abertas de momento</h2>
-            <p className="mt-1 text-sm text-slate-600">
+          <Card className="p-10 text-center">
+            <CalendarDays className="mx-auto mb-3 size-8 text-zinc-400" aria-hidden />
+            <h2 className="text-lg font-semibold text-[#1C1D21]">Sem turmas abertas de momento</h2>
+            <p className="mt-1 text-sm text-zinc-500">
               Esta formação não tem turmas com vagas abertas neste momento. Consulte as outras formações disponíveis.
             </p>
-            <Link
-              href={`/p/${tenant.slug}${sufixoUtm}`}
-              className="mt-5 inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-marca-600 px-4 py-2 text-sm font-medium text-white hover:bg-marca-700"
-            >
-              Ver outras formações
-            </Link>
+            <div className="mt-5">
+              <LinkButton href={`/p/${tenant.slug}${sufixoUtm}`} variante="primario">
+                Ver outras formações
+              </LinkButton>
+            </div>
           </Card>
         ) : (
-          <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+          <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.45fr)]">
+            {/* Coluna esquerda: Garantias e etapas */}
             <div className="space-y-4">
-              <Card className="p-5">
-                <h2 className="flex items-center gap-2 font-semibold text-slate-900">
-                  <GraduationCap className="size-5 text-marca-600" aria-hidden /> Sobre a inscrição
-                </h2>
-                <ul className="mt-3 space-y-2.5 text-sm text-slate-600">
-                  <li className="flex items-start gap-2">
-                    <ShieldCheck className="mt-0.5 size-4 shrink-0 text-emerald-600" aria-hidden />
-                    <span>
-                      <strong>Transparência total:</strong> apresentamos desde já o valor da formação e o calendário das sessões.
+              <Card>
+                <CardHeader
+                  titulo="Como funciona a sua inscrição"
+                  descricao="Processo rápido e transparente em 3 etapas."
+                />
+                <div className="space-y-3.5 p-6 text-xs leading-relaxed text-zinc-600">
+                  <div className="flex items-start gap-3">
+                    <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-[#1C1D21] text-xs font-bold text-[#FBD34D]">
+                      01
                     </span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <ShieldCheck className="mt-0.5 size-4 shrink-0 text-emerald-600" aria-hidden />
-                    <span>
-                      <strong>Atendimento rápido:</strong> após confirmar o seu interesse, a nossa equipa comercial contacta-o pelo WhatsApp para concluir a matrícula e indicar os dados de pagamento.
+                    <div>
+                      <strong className="block text-[#1C1D21]">Escolha a turma e horário</strong>
+                      Selecione a edição com as datas e horários mais convenientes para a sua agenda.
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-[#FBD34D] text-xs font-bold text-[#1C1D21]">
+                      02
                     </span>
-                  </li>
-                </ul>
+                    <div>
+                      <strong className="block text-[#1C1D21]">Confirme os seus dados</strong>
+                      Indique o seu nome e número de WhatsApp e valide o investimento da formação.
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-[#E7F4E8] text-xs font-bold text-[#1E6332]">
+                      03
+                    </span>
+                    <div>
+                      <strong className="block text-[#1C1D21]">Atendimento direto via WhatsApp</strong>
+                      A equipa de {tenant.nome} entra em contacto consigo para concluir a matrícula (a pronto ou parcelado).
+                    </div>
+                  </div>
+                </div>
+              </Card>
+
+              <Card className="bg-[#FAF9F5] p-5">
+                <div className="flex items-start gap-3">
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-2xl bg-[#1C1D21] text-[#FBD34D]">
+                    <ShieldCheck className="size-4.5" aria-hidden />
+                  </span>
+                  <div className="text-xs leading-relaxed text-zinc-600">
+                    <strong className="block text-sm text-[#1C1D21]">Garantia de Transparência</strong>
+                    Sem taxas ocultas: o valor apresentado inclui toda a carga horária de {formacao.cargaHoraria} horas.
+                  </div>
+                </div>
+                <div className="mt-4 flex items-center gap-2 border-t border-dotted border-zinc-200 pt-3 text-xs font-medium text-[#1E6332]">
+                  <MessageCircle className="size-4" aria-hidden />
+                  Receberá confirmação automática no seu WhatsApp.
+                </div>
               </Card>
             </div>
 
-            <Card className="p-5 sm:p-6">
-              <h2 className="text-xl font-semibold text-slate-900">Pré-cadastro</h2>
-              <p className="mt-1 mb-5 text-sm text-slate-600">
-                Preencha os seus dados e confirme o valor e as datas da turma pretendida.
-              </p>
-              <PreCadastroForm
-                acao={submeterPreCadastro.bind(null, tenant.slug, formacao.slug)}
-                turmas={opcoesTurmas}
-                utms={utms}
+            {/* Coluna direita: Formulário de Pré-Cadastro */}
+            <Card>
+              <CardHeader
+                titulo="Ficha de Pré-Cadastro"
+                descricao="Selecione a turma pretendida e preencha os seus dados de contacto."
+                acoes={
+                  <span className="inline-flex items-center gap-1 rounded-full bg-[#E7F4E8] px-2.5 py-1 text-[11px] font-semibold text-[#1E6332]">
+                    <CheckCircle2 className="size-3.5" aria-hidden /> Vagas disponíveis
+                  </span>
+                }
               />
+              <div className="p-6">
+                <PreCadastroForm
+                  acao={submeterPreCadastro.bind(null, tenant.slug, formacao.slug)}
+                  turmas={opcoesTurmas}
+                  utms={utms}
+                />
+              </div>
             </Card>
           </div>
         )}

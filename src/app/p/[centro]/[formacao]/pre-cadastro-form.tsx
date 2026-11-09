@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2 } from "lucide-react";
+import { CalendarDays, CheckCircle2, Clock } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useFormAcao } from "@/components/form-acao";
 import { Alerta, Badge, Button, Field, Input } from "@/components/ui";
@@ -59,13 +59,13 @@ export function PreCadastroForm({
 
       {/* Escolha da turma */}
       <fieldset className="space-y-2.5">
-        <legend className="text-sm font-semibold text-slate-800">
+        <legend className="text-xs font-bold tracking-wider text-zinc-500 uppercase">
           {turmas.length > 1 ? "1. Escolha a turma e as datas" : "Turma e calendário"}
         </legend>
         {turmas.map((t) => (
           <label
             key={t.id}
-            className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-white p-3.5 transition-colors hover:border-marca-300 has-checked:border-marca-600 has-checked:bg-marca-50/50"
+            className="flex cursor-pointer items-start gap-3.5 rounded-2xl border border-zinc-200/90 bg-[#FAF9F5] p-4 transition-all duration-200 hover:border-zinc-300 has-checked:border-[#1C1D21] has-checked:bg-white has-checked:shadow-sm"
           >
             <input
               type="radio"
@@ -73,19 +73,25 @@ export function PreCadastroForm({
               value={t.id}
               checked={turma?.id === t.id}
               onChange={() => setTurmaId(t.id)}
-              className="mt-1 size-4 shrink-0 accent-marca-600"
+              className="mt-1 size-4 shrink-0 accent-[#1C1D21]"
             />
-            <div className="min-w-0 flex-1">
+            <div className="min-w-0 flex-1 space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="font-semibold text-slate-900">
+                <span className="inline-flex items-center gap-1.5 text-sm font-bold text-[#1C1D21]">
+                  <CalendarDays className="size-4 text-zinc-500" aria-hidden />
                   Turma {t.codigo} · {t.textoDatas}
                 </span>
-                <span className="font-bold text-marca-700">{t.precoFormatado}</span>
+                <span className="rounded-full bg-[#FBD34D] px-3 py-0.5 text-xs font-extrabold text-[#1C1D21]">
+                  {t.precoFormatado}
+                </span>
               </div>
-              <div className="mt-1 flex flex-wrap gap-1.5 text-xs text-slate-600">
+              <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-600">
                 {t.horariosResumo.map((h, i) => (
-                  <span key={i} className="rounded bg-slate-100 px-2 py-0.5">
-                    {h}
+                  <span
+                    key={i}
+                    className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-0.5 text-[11px] font-medium text-zinc-700 ring-1 ring-zinc-200/80"
+                  >
+                    <Clock className="size-3 text-zinc-400" aria-hidden /> {h}
                   </span>
                 ))}
                 {t.vagasRestantes !== null && (
@@ -97,7 +103,7 @@ export function PreCadastroForm({
             </div>
           </label>
         ))}
-        {e.turmaId && <p className="text-xs text-red-600">{e.turmaId}</p>}
+        {e.turmaId && <p className="text-xs font-medium text-[#B42318]">{e.turmaId}</p>}
       </fieldset>
 
       {/* Dados do candidato */}
@@ -123,42 +129,45 @@ export function PreCadastroForm({
 
       {/* Qualificação obrigatória: aceitação explícita de preço e datas */}
       {turma && (
-        <div className="space-y-3 rounded-xl border border-marca-200 bg-marca-50/40 p-4">
-          <p className="text-xs font-semibold tracking-wide text-marca-800 uppercase">
-            Confirmação obrigatória para pré-cadastro
-          </p>
+        <div className="space-y-3 rounded-2xl border border-zinc-200/90 bg-[#FAF9F5] p-4">
+          <div className="flex items-center justify-between border-b border-dotted border-zinc-200 pb-2">
+            <p className="text-xs font-bold tracking-wider text-[#1C1D21] uppercase">
+              Confirmação de Condições
+            </p>
+            <span className="size-2 rounded-full bg-[#FBD34D]" aria-hidden />
+          </div>
 
-          <label className="flex cursor-pointer items-start gap-3 text-sm text-slate-800">
+          <label className="flex cursor-pointer items-start gap-3 text-xs leading-relaxed text-zinc-700 sm:text-sm">
             <input
               type="checkbox"
               name="aceitouPreco"
               required
-              className="mt-0.5 size-5 shrink-0 accent-marca-600"
+              className="mt-0.5 size-4.5 shrink-0 accent-[#1C1D21]"
             />
             <span>
-              Aceito o preço de <strong>{turma.precoFormatado}</strong> desta formação.
-              {e.aceitouPreco && <span className="block text-xs text-red-600">{e.aceitouPreco}</span>}
+              Tomei conhecimento e aceito o investimento de <strong className="text-[#1C1D21]">{turma.precoFormatado}</strong> desta formação.
+              {e.aceitouPreco && <span className="block text-xs font-medium text-[#B42318]">{e.aceitouPreco}</span>}
             </span>
           </label>
 
-          <label className="flex cursor-pointer items-start gap-3 text-sm text-slate-800">
+          <label className="flex cursor-pointer items-start gap-3 text-xs leading-relaxed text-zinc-700 sm:text-sm">
             <input
               type="checkbox"
               name="aceitouDatas"
               required
-              className="mt-0.5 size-5 shrink-0 accent-marca-600"
+              className="mt-0.5 size-4.5 shrink-0 accent-[#1C1D21]"
             />
             <span>
-              Aceito as datas da turma (<strong>{turma.textoDatas}</strong>) e tenho disponibilidade nos horários indicados.
-              {e.aceitouDatas && <span className="block text-xs text-red-600">{e.aceitouDatas}</span>}
+              Confirmo disponibilidade para as datas da turma (<strong className="text-[#1C1D21]">{turma.textoDatas}</strong>) e horários indicados.
+              {e.aceitouDatas && <span className="block text-xs font-medium text-[#B42318]">{e.aceitouDatas}</span>}
             </span>
           </label>
         </div>
       )}
 
-      <Button type="submit" disabled={pendente} className="w-full py-3 text-base">
-        <CheckCircle2 className="size-5" aria-hidden />
-        {pendente ? "A enviar pré-cadastro…" : "Confirmar interesse e receber contacto no WhatsApp"}
+      <Button type="submit" disabled={pendente} className="min-h-11 w-full text-sm font-semibold">
+        <CheckCircle2 className="size-4 text-[#FBD34D]" aria-hidden />
+        {pendente ? "A enviar pré-cadastro…" : "Confirmar pré-cadastro e receber contacto no WhatsApp"}
       </Button>
     </form>
   );
