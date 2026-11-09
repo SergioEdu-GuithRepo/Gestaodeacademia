@@ -1,5 +1,5 @@
 import type { EstadoLead, Prisma } from "@prisma/client";
-import { ArrowUpRight, ExternalLink, MessageCircle, Search } from "lucide-react";
+import { ArrowUpRight, MessageCircle, Search } from "lucide-react";
 import { headers } from "next/headers";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -148,9 +148,6 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <CopiarUrlLanding url={urlLanding} />
-          <LinkButton href={`/p/${user.tenant.slug}`} target="_blank" rel="noopener noreferrer" variante="primario">
-            <ExternalLink className="size-3.5 text-[#FBD34D]" aria-hidden /> Abrir página pública
-          </LinkButton>
         </div>
       </div>
 

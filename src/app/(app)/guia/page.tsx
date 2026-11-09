@@ -128,14 +128,9 @@ export default async function GuiaPage() {
         titulo="Roteiro de Operação"
         descricao={`Guia prático e estado operacional de ${user.tenant.nome} passo a passo.`}
         acoes={
-          <div className="flex flex-wrap gap-2">
-            <LinkButton href={`/p/${user.tenant.slug}`} target="_blank" variante="secundario">
-              Catálogo Público <ExternalLink className="size-3.5" aria-hidden />
-            </LinkButton>
-            <LinkButton href="/portais" variante="primario">
-              <Smartphone className="size-4 text-[#FBD34D]" aria-hidden /> Abrir Portais
-            </LinkButton>
-          </div>
+          <LinkButton href="/portais" variante="primario">
+            <Smartphone className="size-4 text-[#FBD34D]" aria-hidden /> Abrir Portais
+          </LinkButton>
         }
       />
 

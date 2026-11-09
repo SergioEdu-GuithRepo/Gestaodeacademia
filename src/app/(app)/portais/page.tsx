@@ -1,4 +1,4 @@
-import { ArrowUpRight, Globe, Search } from "lucide-react";
+import { ArrowUpRight, Search } from "lucide-react";
 import Link from "next/link";
 import { GrelhaProgressiva } from "@/components/lista-progressiva";
 import { Badge, Card, Vazio } from "@/components/ui";
@@ -28,7 +28,6 @@ export default async function PortaisHubPage({ searchParams }: Props) {
 
   const verFormadores = pode(user.perfil, "formadores:ver");
   const verFormandos = pode(user.perfil, "formandos:ver");
-  const verCatalogoPublico = pode(user.perfil, "leads:ver");
 
   const [formadores, formandos] = await Promise.all([
     verFormadores
@@ -79,24 +78,11 @@ export default async function PortaisHubPage({ searchParams }: Props) {
   return (
     <div className="space-y-6">
       {/* Cabeçalho Editorial */}
-      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-        <div>
-          <p className="text-xs font-medium tracking-wider text-zinc-500 uppercase">
-            {user.tenant.nome} · Fichas e Acessos Externos
-          </p>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight text-[#1C1D21]">Portal</h1>
-        </div>
-        {verCatalogoPublico && (
-          <Link
-            href={`/p/${user.tenant.slug}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex h-10 items-center gap-2 rounded-full border border-zinc-200/90 bg-white px-4 text-xs font-medium text-[#1C1D21] shadow-2xs transition-colors hover:bg-zinc-50"
-          >
-            <Globe className="size-3.5 text-zinc-500" aria-hidden />
-            Catálogo Público (/p/{user.tenant.slug}) ↗
-          </Link>
-        )}
+      <div>
+        <p className="text-xs font-medium tracking-wider text-zinc-500 uppercase">
+          {user.tenant.nome} · Fichas e Acessos Externos
+        </p>
+        <h1 className="mt-1 text-3xl font-semibold tracking-tight text-[#1C1D21]">Portal</h1>
       </div>
 
       {/* Barra Resumo + Pesquisa Pílula (Referência 3) */}
