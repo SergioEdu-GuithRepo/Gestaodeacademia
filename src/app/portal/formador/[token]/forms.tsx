@@ -40,9 +40,9 @@ export function FormConfirmarSessaoPortal({
   }
 
   return (
-    <div className="mt-2">
+    <div className="mt-3">
       {feedback?.ok && !aberto && (
-        <div className="mb-2">
+        <div className="mb-2.5">
           <Alerta tipo="sucesso">{feedback.ok}</Alerta>
         </div>
       )}
@@ -55,11 +55,11 @@ export function FormConfirmarSessaoPortal({
             setFeedback(null);
             setAberto(true);
           }}
-          className="min-h-9 px-3 text-xs"
+          className="min-h-9 px-3.5 text-xs"
         >
           {estadoAtual === "AGENDADA" ? (
             <>
-              <CheckCircle2 className="size-3.5" aria-hidden /> Confirmar aula e horas
+              <CheckCircle2 className="size-3.5 text-[#FBD34D]" aria-hidden /> Confirmar aula e horas
             </>
           ) : (
             <>
@@ -70,12 +70,15 @@ export function FormConfirmarSessaoPortal({
       ) : (
         <form
           onSubmit={submeter}
-          className="mt-2 space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-left"
+          className="anim-enter mt-3 space-y-3.5 rounded-2xl border border-zinc-200/90 bg-[#FAF9F5] p-4 text-left"
         >
-          <div className="text-xs font-semibold text-slate-800">
-            {estadoAtual === "AGENDADA"
-              ? "Confirmar realização da sessão"
-              : "Atualizar horas lecionadas e sumário"}
+          <div className="flex items-center justify-between border-b border-dotted border-zinc-200 pb-2 text-xs font-bold tracking-wider text-[#1C1D21] uppercase">
+            <span>
+              {estadoAtual === "AGENDADA"
+                ? "Confirmar realização da sessão"
+                : "Atualizar horas lecionadas e sumário"}
+            </span>
+            <span className="size-2 rounded-full bg-[#FBD34D]" aria-hidden />
           </div>
 
           {feedback?.erro && <Alerta tipo="erro">{feedback.erro}</Alerta>}
@@ -104,16 +107,16 @@ export function FormConfirmarSessaoPortal({
             </div>
           </div>
 
-          <div className="flex justify-end gap-2">
+          <div className="flex justify-end gap-2 border-t border-dotted border-zinc-200 pt-3">
             <Button
               type="button"
-              variante="fantasma"
+              variante="secundario"
               onClick={() => setAberto(false)}
-              className="min-h-8 px-2.5 text-xs"
+              className="min-h-8.5 px-3 text-xs"
             >
               Cancelar
             </Button>
-            <Button type="submit" disabled={pendente} className="min-h-8 px-3 text-xs">
+            <Button type="submit" disabled={pendente} className="min-h-8.5 px-3.5 text-xs">
               {pendente ? "A guardar…" : "Guardar confirmação"}
             </Button>
           </div>

@@ -1,4 +1,5 @@
 import {
+  ArrowUpRight,
   BookOpen,
   CalendarDays,
   CheckCircle2,
@@ -14,7 +15,8 @@ import {
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Badge, Card, CardHeader, Tabela, Td, Th, Vazio } from "@/components/ui";
+import { TbodyProgressivo } from "@/components/lista-progressiva";
+import { Alerta, Badge, Card, CardHeader, Tabela, Td, Th, Vazio } from "@/components/ui";
 import { dataSimples, diaLocal, formatData, formatDiaSemana, formatHora, hojeLocal } from "@/lib/datas";
 import { dbTenant, prisma } from "@/lib/db";
 import {
@@ -31,6 +33,13 @@ import { calcularSaldoPontos } from "@/lib/retencao";
 type Props = {
   params: Promise<{ token: string }>;
 };
+
+function iniciaisNome(nome: string) {
+  const partes = nome.trim().split(/\s+/).filter(Boolean);
+  if (partes.length === 0) return "GA";
+  if (partes.length === 1) return partes[0].slice(0, 2).toUpperCase();
+  return `${partes[0][0]}${partes[partes.length - 1][0]}`.toUpperCase();
+}
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { token } = await params;
@@ -141,71 +150,137 @@ export default async function PortalFormandoPage({ params }: Props) {
   const textoConviteWhatsapp = `Olá! Recomendo as formações de ${formando.tenant.nome}. Consulta o catálogo em /p/${formando.tenant.slug} e, no momento da matrícula, indica o meu nome (${formando.nome})!`;
   const urlConviteWhatsapp = `https://wa.me/?text=${encodeURIComponent(textoConviteWhatsapp)}`;
 
+  const iniciais = iniciaisNome(formando.nome);
+  const iniciaisCentro = iniciaisNome(formando.tenant.nome);
+  const pctLiquidado =
+    resumoGeral.total > 0n ? Math.min(100, Math.round((Number(resumoGeral.pago) / Number(resumoGeral.total)) * 100)) : 100;
+
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      {/* Cabeçalho do Portal do Formando */}
-      <header className="bg-gradient-to-br from-slate-900 via-marca-950 to-marca-800 text-white">
-        <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-marca-100 backdrop-blur">
-              <GraduationCap className="size-4" aria-hidden />
-              <span>{formando.tenant.nome}</span>
-              <span className="opacity-60">·</span>
-              <span>Portal do Formando</span>
+    <div className="min-h-dvh bg-[#F5F4EF] text-[#1C1D21]">
+      {/* Barra superior editorial */}
+      <nav className="sticky top-0 z-30 border-b border-zinc-200/70 bg-[#F5F4EF]/90 backdrop-blur-md">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3.5 sm:px-8">
+          <div className="flex items-center gap-3">
+            <div className="flex size-10 items-center justify-center rounded-2xl bg-[#1C1D21] text-xs font-extrabold tracking-wider text-[#FBD34D] shadow-2xs">
+              {iniciaisCentro}
             </div>
-            <Link
-              href={`/p/${formando.tenant.slug}`}
-              className="inline-flex items-center gap-1 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-white/20"
-            >
-              Explorar novas formações ↗
-            </Link>
+            <div>
+              <div className="text-sm font-extrabold tracking-tight text-[#1C1D21] uppercase">
+                {formando.tenant.nome}
+              </div>
+              <div className="text-[11px] font-medium text-zinc-500">Portal Pessoal do Formando</div>
+            </div>
           </div>
 
-          <h1 className="mt-4 text-2xl font-bold tracking-tight sm:text-3xl">{formando.nome}</h1>
-          <p className="mt-1 text-sm text-slate-300">
-            {[formando.whatsapp, formando.email, formando.profissao].filter(Boolean).join(" · ")}
-          </p>
+          <Link
+            href={`/p/${formando.tenant.slug}`}
+            className="inline-flex min-h-9.5 items-center gap-1.5 rounded-full bg-[#1C1D21] px-4 text-xs font-semibold text-white shadow-2xs transition-all hover:-translate-y-0.5 hover:bg-zinc-800"
+          >
+            Explorar Novas Formações <ArrowUpRight className="size-3.5 text-[#FBD34D]" aria-hidden />
+          </Link>
         </div>
-      </header>
+      </nav>
 
-      <main className="mx-auto max-w-5xl space-y-6 px-4 py-8 sm:px-6">
+      <main className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-8 sm:py-8">
+        {/* Hero do Formando */}
+        <section className="anim-enter rounded-[2rem] border border-zinc-900/15 bg-[#1C1D21] p-6 text-white shadow-xl sm:p-8">
+          <div className="grid items-center gap-6 lg:grid-cols-[1.35fr_0.65fr]">
+            <div className="space-y-4">
+              <div className="flex items-center gap-4">
+                <div className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-[#FBD34D] text-lg font-extrabold text-[#1C1D21] shadow-sm">
+                  {iniciais}
+                </div>
+                <div>
+                  <div className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-0.5 text-[11px] font-semibold text-[#FBD34D]">
+                    <GraduationCap className="size-3.5" aria-hidden /> Área Pessoal do Formando
+                  </div>
+                  <h1 className="mt-1 text-2xl font-bold tracking-tight text-white sm:text-3xl">
+                    {formando.nome}
+                  </h1>
+                  <p className="mt-0.5 text-xs text-zinc-300 sm:text-sm">
+                    {[formando.whatsapp, formando.email, formando.profissao].filter(Boolean).join(" · ")}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Cartão lateral de Progresso Financeiro */}
+            <div className="rounded-3xl border border-white/15 bg-[#FAF9F5] p-5 text-[#1C1D21] shadow-lg">
+              <div className="mb-3 flex items-center justify-between border-b border-dotted border-zinc-300 pb-2">
+                <span className="text-xs font-bold tracking-wider text-zinc-600 uppercase">Resumo Financeiro</span>
+                <span className="text-xs font-extrabold text-[#1C1D21]">{pctLiquidado}% liquidado</span>
+              </div>
+
+              <div className="space-y-2 text-xs">
+                <div className="flex items-baseline">
+                  <span className="text-zinc-500">Valor total contratado</span>
+                  <span className="leader-dots" />
+                  <span className="font-bold text-[#1C1D21]">{formatKz(resumoGeral.total)}</span>
+                </div>
+                <div className="flex items-baseline">
+                  <span className="text-zinc-500">Total já pago</span>
+                  <span className="leader-dots" />
+                  <span className="font-bold text-[#1E6332]">{formatKz(resumoGeral.pago)}</span>
+                </div>
+              </div>
+
+              <div className="mt-3 h-3 w-full overflow-hidden rounded-full bg-[#ECEAE2] p-0.5">
+                <div
+                  style={{ width: `${Math.max(6, pctLiquidado)}%` }}
+                  className="h-full rounded-full bg-[#FBD34D] transition-all duration-500"
+                />
+              </div>
+            </div>
+          </div>
+        </section>
+
         {/* 4 Cartões de KPI */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Card className="p-4">
-            <div className="flex items-center justify-between text-xs font-medium tracking-wide text-slate-500 uppercase">
-              <span>Formações inscritas</span>
-              <BookOpen className="size-4 text-marca-600" aria-hidden />
+          <Card className="p-5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-zinc-500">Formações Inscritas</span>
+              <span className="flex size-9 items-center justify-center rounded-full bg-[#1C1D21] text-[#FBD34D]">
+                <BookOpen className="size-4" aria-hidden />
+              </span>
             </div>
-            <div className="mt-2 text-2xl font-bold text-slate-900">{matriculasValidas.length}</div>
-            <div className="mt-0.5 text-xs text-slate-500">Matrícula(s) ativa(s) / concluída(s)</div>
+            <div className="mt-3 text-2xl font-bold tracking-tight text-[#1C1D21] sm:text-3xl">
+              {matriculasValidas.length}
+            </div>
+            <div className="mt-1 text-xs text-zinc-500">Matrícula(s) ativa(s) / concluída(s)</div>
           </Card>
 
-          <Card className="p-4">
-            <div className="flex items-center justify-between text-xs font-medium tracking-wide text-slate-500 uppercase">
-              <span>Total pago</span>
-              <CheckCircle2 className="size-4 text-emerald-600" aria-hidden />
+          <Card className="p-5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-zinc-500">Total Liquidado</span>
+              <span className="flex size-9 items-center justify-center rounded-full bg-[#E7F4E8] text-[#1E6332]">
+                <CheckCircle2 className="size-4" aria-hidden />
+              </span>
             </div>
-            <div className="mt-2 text-xl font-bold text-emerald-700">{formatKz(resumoGeral.pago)}</div>
-            <div className="mt-0.5 text-xs text-slate-500">
+            <div className="mt-3 text-xl font-bold tracking-tight text-[#1E6332] sm:text-2xl">
+              {formatKz(resumoGeral.pago)}
+            </div>
+            <div className="mt-1 text-xs text-zinc-500">
               Total contratado: {formatKz(resumoGeral.total)}
             </div>
           </Card>
 
-          <Card className="p-4">
-            <div className="flex items-center justify-between text-xs font-medium tracking-wide text-slate-500 uppercase">
-              <span>Valor em aberto</span>
-              <Wallet className="size-4 text-amber-600" aria-hidden />
+          <Card className="p-5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-zinc-500">Valor em Aberto</span>
+              <span className="flex size-9 items-center justify-center rounded-full bg-[#FBD34D] text-[#1C1D21]">
+                <Wallet className="size-4" aria-hidden />
+              </span>
             </div>
             <div
-              className={`mt-2 text-xl font-bold ${
-                resumoGeral.parcelasEmAtraso > 0 ? "text-red-600" : "text-slate-900"
+              className={`mt-3 text-xl font-bold tracking-tight sm:text-2xl ${
+                resumoGeral.parcelasEmAtraso > 0 ? "text-[#B42318]" : "text-[#1C1D21]"
               }`}
             >
               {formatKz(resumoGeral.divida)}
             </div>
-            <div className="mt-0.5 text-xs text-slate-500">
+            <div className="mt-1 text-xs text-zinc-500">
               {resumoGeral.parcelasEmAtraso > 0 ? (
-                <span className="font-medium text-red-600">
+                <span className="font-semibold text-[#B42318]">
                   {resumoGeral.parcelasEmAtraso} parcela(s) em atraso
                 </span>
               ) : resumoGeral.parcelasEmFalta > 0 ? (
@@ -216,31 +291,29 @@ export default async function PortalFormandoPage({ params }: Props) {
             </div>
           </Card>
 
-          <Card className="p-4">
-            <div className="flex items-center justify-between text-xs font-medium tracking-wide text-slate-500 uppercase">
-              <span>Pontos de indicação</span>
-              <Gift className="size-4 text-marca-600" aria-hidden />
+          <Card className="p-5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-zinc-500">Pontos de Indicação</span>
+              <span className="flex size-9 items-center justify-center rounded-full bg-[#F5F4EF] text-[#1C1D21]">
+                <Gift className="size-4" aria-hidden />
+              </span>
             </div>
-            <div className="mt-2 text-2xl font-bold text-marca-800">{saldoPontos.saldoDisponivel} pts</div>
-            <div className="mt-0.5 text-xs text-slate-500">
-              Equivale a <strong>{descontoPontosPct}%</strong> de desconto
+            <div className="mt-3 text-2xl font-bold tracking-tight text-[#1C1D21] sm:text-3xl">
+              {saldoPontos.saldoDisponivel} pts
+            </div>
+            <div className="mt-1 text-xs text-zinc-500">
+              Equivale a <strong className="text-[#1C1D21]">{descontoPontosPct}%</strong> de desconto
             </div>
           </Card>
         </div>
 
         {/* Secção 1: As Minhas Formações, Próximas Aulas e Plano de Parcelas */}
-        <section className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-slate-900">
-              As Minhas Formações, Horários e Plano de Parcelas
-            </h2>
-          </div>
-
+        <section className="space-y-5">
           {matriculasValidas.length === 0 ? (
             <Card>
               <Vazio>
                 Ainda não tem matrículas ativas neste centro.{" "}
-                <Link href={`/p/${formando.tenant.slug}`} className="font-medium text-marca-700 hover:underline">
+                <Link href={`/p/${formando.tenant.slug}`} className="font-semibold text-[#1C1D21] underline">
                   Ver catálogo de formações disponíveis ↗
                 </Link>
               </Vazio>
@@ -256,156 +329,144 @@ export default async function PortalFormandoPage({ params }: Props) {
                 proximasSessoes.length > 0 ? proximasSessoes.slice(0, 6) : mat.turma.sessoes.slice(-4);
 
               return (
-                <Card key={mat.id}>
-                  <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 px-4 py-3">
-                    <div>
+                <Card key={mat.id} className="overflow-hidden">
+                  <CardHeader
+                    titulo={`${mat.turma.formacao.nome} · Turma ${mat.turma.codigo}`}
+                    descricao={`Carga horária: ${mat.turma.formacao.cargaHoraria} h · Inscrito em ${formatData(dataSimples(diaLocal(mat.createdAt)))}${mat.campanha ? ` · Campanha ${mat.campanha.nome} (-${mat.campanha.descontoPct}%)` : ""}${mat.pontosResgatados > 0 ? ` · ${mat.pontosResgatados} pts resgatados` : ""}`}
+                    acoes={
                       <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="text-base font-semibold text-slate-900">
-                          {mat.turma.formacao.nome}
-                        </h3>
-                        <Badge cor="azul">Turma {mat.turma.codigo}</Badge>
                         <Badge cor={mat.estado === "ATIVA" ? "azul" : "verde"}>
                           {NOMES_ESTADO_MATRICULA[mat.estado]}
                         </Badge>
+                        {resumo.divida === 0n ? (
+                          <Badge cor="verde">Plano totalmente liquidado</Badge>
+                        ) : resumo.parcelasEmAtraso > 0 ? (
+                          <Badge cor="vermelho">{resumo.parcelasEmAtraso} parcela(s) em atraso</Badge>
+                        ) : (
+                          <Badge cor="amarelo">{resumo.parcelasEmFalta} parcela(s) em aberto</Badge>
+                        )}
                       </div>
-                      <p className="mt-1 text-xs text-slate-500">
-                        Carga horária: {mat.turma.formacao.cargaHoraria} h · Inscrito em{" "}
-                        {formatData(dataSimples(diaLocal(mat.createdAt)))}
-                        {mat.campanha && ` · Campanha ${mat.campanha.nome} (-${mat.campanha.descontoPct}%)`}
-                        {mat.pontosResgatados > 0 && ` · ${mat.pontosResgatados} pts resgatados`}
-                      </p>
+                    }
+                  />
+
+                  <div className="space-y-6 p-6">
+                    {/* Resumo financeiro pontilhado da matrícula */}
+                    <div className="grid gap-3 rounded-2xl border border-zinc-200/80 bg-[#FAF9F5] p-4 text-xs sm:grid-cols-2 lg:grid-cols-4">
+                      <div className="space-y-1">
+                        <span className="text-zinc-500">Valor contratado</span>
+                        <div className="text-base font-bold text-[#1C1D21]">{formatKz(mat.valorTotal)}</div>
+                        {mat.desconto > 0n && (
+                          <div className="text-[11px] font-medium text-[#1E6332]">
+                            Desconto aplicado: {formatKz(mat.desconto)}
+                          </div>
+                        )}
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-zinc-500">Valor liquidado</span>
+                        <div className="text-base font-bold text-[#1E6332]">{formatKz(resumo.pago)}</div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-zinc-500">Saldo em falta</span>
+                        <div
+                          className={`text-base font-bold ${
+                            resumo.parcelasEmAtraso > 0 ? "text-[#B42318]" : "text-[#1C1D21]"
+                          }`}
+                        >
+                          {formatKz(resumo.divida)}
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-zinc-500">Modalidade</span>
+                        <div className="text-base font-bold text-[#1C1D21]">{parcelas.length} parcela(s)</div>
+                      </div>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      {resumo.divida === 0n ? (
-                        <Badge cor="verde">Plano totalmente liquidado</Badge>
-                      ) : resumo.parcelasEmAtraso > 0 ? (
-                        <Badge cor="vermelho">{resumo.parcelasEmAtraso} parcela(s) em atraso</Badge>
+
+                    {/* Próximas sessões / calendário da turma */}
+                    <div>
+                      <h4 className="mb-3 text-xs font-bold tracking-wider text-zinc-500 uppercase">
+                        Calendário de sessões da turma ({mat.turma.sessoes.length} sessão(ões))
+                      </h4>
+                      {sessoesMostrar.length === 0 ? (
+                        <p className="text-xs text-zinc-500">Horário de sessões a anunciar brevemente.</p>
                       ) : (
-                        <Badge cor="amarelo">{resumo.parcelasEmFalta} parcela(s) em aberto</Badge>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          {sessoesMostrar.map((s) => (
+                            <div
+                              key={s.id}
+                              className="flex items-start justify-between gap-2.5 rounded-2xl border border-zinc-200/80 bg-[#FAF9F5] p-3.5 text-xs"
+                            >
+                              <div>
+                                <div className="font-bold text-[#1C1D21]">
+                                  {formatDiaSemana(s.inicio)} ({formatData(dataSimples(diaLocal(s.inicio)))})
+                                </div>
+                                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-zinc-600">
+                                  <span className="inline-flex items-center gap-1">
+                                    <Clock className="size-3.5 text-zinc-400" aria-hidden />
+                                    {formatHora(s.inicio)}–{formatHora(s.fim)}
+                                  </span>
+                                  <span className="inline-flex items-center gap-1">
+                                    <MapPin className="size-3.5 text-zinc-400" aria-hidden />
+                                    {s.sala.nome}
+                                  </span>
+                                  <span>Formador: {s.formador.nome}</span>
+                                </div>
+                              </div>
+                              <Badge cor={s.estado === "REALIZADA" ? "verde" : "azul"}>
+                                {s.estado === "REALIZADA" ? "Realizada" : "Agendada"}
+                              </Badge>
+                            </div>
+                          ))}
+                        </div>
                       )}
                     </div>
-                  </div>
 
-                  {/* Resumo financeiro da matrícula */}
-                  <dl className="grid grid-cols-2 gap-3 border-b border-slate-100 bg-slate-50/60 px-4 py-3 text-sm sm:grid-cols-4">
+                    {/* Tabela de parcelas */}
                     <div>
-                      <dt className="text-xs font-medium text-slate-500 uppercase">Valor contratado</dt>
-                      <dd className="mt-0.5 font-semibold text-slate-900">
-                        {formatKz(mat.valorTotal)}
-                        {mat.desconto > 0n && (
-                          <span className="block text-xs font-normal text-emerald-700">
-                            Poupança/desconto: {formatKz(mat.desconto)}
-                          </span>
-                        )}
-                      </dd>
+                      <h4 className="mb-2 text-xs font-bold tracking-wider text-zinc-500 uppercase">
+                        Plano de Parcelas
+                      </h4>
+                      <Tabela>
+                        <thead>
+                          <tr>
+                            <Th>Parcela</Th>
+                            <Th>Vencimento</Th>
+                            <Th className="text-right">Valor</Th>
+                            <Th className="text-right">Pago</Th>
+                            <Th className="text-right">Em falta</Th>
+                            <Th>Estado</Th>
+                          </tr>
+                        </thead>
+                        <TbodyProgressivo colSpan={6}>
+                          {parcelas.map((p) => {
+                            const e = estadoParcela(p, hoje);
+                            const falta = p.valor > p.pago ? p.valor - p.pago : 0n;
+                            return (
+                              <tr key={p.id} className="bg-[#FAF9F5]/70 transition-colors hover:bg-[#FEF3C7]/40">
+                                <Td className="font-semibold text-[#1C1D21]">{p.numero}.ª parcela</Td>
+                                <Td className="whitespace-nowrap">
+                                  <span className="inline-flex items-center gap-1.5">
+                                    <CalendarDays className="size-3.5 text-zinc-400" aria-hidden />
+                                    {formatData(p.vencimento)}
+                                  </span>
+                                </Td>
+                                <Td className="text-right whitespace-nowrap">{formatKz(p.valor)}</Td>
+                                <Td className="text-right font-semibold whitespace-nowrap text-[#1E6332]">
+                                  {formatKz(p.pago)}
+                                </Td>
+                                <Td className="text-right font-semibold whitespace-nowrap text-[#1C1D21]">
+                                  {formatKz(falta)}
+                                </Td>
+                                <Td>
+                                  <Badge cor={CORES_ESTADO_PARCELA[e]}>
+                                    {NOMES_ESTADO_PARCELA[e]}
+                                  </Badge>
+                                </Td>
+                              </tr>
+                            );
+                          })}
+                        </TbodyProgressivo>
+                      </Tabela>
                     </div>
-                    <div>
-                      <dt className="text-xs font-medium text-slate-500 uppercase">Valor pago</dt>
-                      <dd className="mt-0.5 font-semibold text-emerald-700">{formatKz(resumo.pago)}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs font-medium text-slate-500 uppercase">Em falta</dt>
-                      <dd
-                        className={`mt-0.5 font-semibold ${
-                          resumo.parcelasEmAtraso > 0 ? "text-red-600" : "text-slate-900"
-                        }`}
-                      >
-                        {formatKz(resumo.divida)}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs font-medium text-slate-500 uppercase">Plano</dt>
-                      <dd className="mt-0.5 text-slate-800">
-                        {parcelas.length} parcela(s)
-                      </dd>
-                    </div>
-                  </dl>
-
-                  {/* Próximas sessões / calendário da turma */}
-                  <div className="border-b border-slate-100 p-4">
-                    <h4 className="mb-2.5 text-xs font-semibold tracking-wide text-slate-500 uppercase">
-                      Calendário de sessões da turma ({mat.turma.sessoes.length} sessão(ões))
-                    </h4>
-                    {sessoesMostrar.length === 0 ? (
-                      <p className="text-xs text-slate-500">Horário de sessões a anunciar brevemente.</p>
-                    ) : (
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        {sessoesMostrar.map((s) => (
-                          <div
-                            key={s.id}
-                            className="flex items-start justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs"
-                          >
-                            <div>
-                              <div className="font-medium text-slate-900">
-                                {formatDiaSemana(s.inicio)} ({formatData(dataSimples(diaLocal(s.inicio)))})
-                              </div>
-                              <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-slate-600">
-                                <span className="inline-flex items-center gap-1">
-                                  <Clock className="size-3 text-slate-400" aria-hidden />
-                                  {formatHora(s.inicio)}–{formatHora(s.fim)}
-                                </span>
-                                <span className="inline-flex items-center gap-1">
-                                  <MapPin className="size-3 text-slate-400" aria-hidden />
-                                  {s.sala.nome}
-                                </span>
-                                <span>Formador: {s.formador.nome}</span>
-                              </div>
-                            </div>
-                            <Badge cor={s.estado === "REALIZADA" ? "verde" : "azul"}>
-                              {s.estado === "REALIZADA" ? "Realizada" : "Agendada"}
-                            </Badge>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Tabela de parcelas */}
-                  <div>
-                    <div className="px-4 pt-3 pb-1 text-xs font-semibold tracking-wide text-slate-500 uppercase">
-                      Plano de Parcelas
-                    </div>
-                    <Tabela>
-                      <thead>
-                        <tr>
-                          <Th>Parcela</Th>
-                          <Th>Vencimento</Th>
-                          <Th className="text-right">Valor</Th>
-                          <Th className="text-right">Pago</Th>
-                          <Th className="text-right">Em falta</Th>
-                          <Th>Estado</Th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {parcelas.map((p) => {
-                          const e = estadoParcela(p, hoje);
-                          const falta = p.valor > p.pago ? p.valor - p.pago : 0n;
-                          return (
-                            <tr key={p.id}>
-                              <Td className="font-medium">{p.numero}.ª parcela</Td>
-                              <Td className="whitespace-nowrap">
-                                <span className="inline-flex items-center gap-1">
-                                  <CalendarDays className="size-3.5 text-slate-400" aria-hidden />
-                                  {formatData(p.vencimento)}
-                                </span>
-                              </Td>
-                              <Td className="text-right whitespace-nowrap">{formatKz(p.valor)}</Td>
-                              <Td className="text-right whitespace-nowrap text-emerald-700">
-                                {formatKz(p.pago)}
-                              </Td>
-                              <Td className="text-right font-medium whitespace-nowrap">
-                                {formatKz(falta)}
-                              </Td>
-                              <Td>
-                                <Badge cor={CORES_ESTADO_PARCELA[e]}>
-                                  {NOMES_ESTADO_PARCELA[e]}
-                                </Badge>
-                              </Td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </Tabela>
                   </div>
                 </Card>
               );
@@ -423,52 +484,49 @@ export default async function PortalFormandoPage({ params }: Props) {
                 href={urlConviteWhatsapp}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-emerald-700"
+                className="inline-flex min-h-10 items-center gap-2 rounded-full bg-[#1C1D21] px-4 py-2 text-xs font-semibold text-white shadow-2xs transition-all hover:-translate-y-0.5 hover:bg-zinc-800"
               >
-                <MessageCircle className="size-4" aria-hidden /> Convidar Amigo no WhatsApp
+                <MessageCircle className="size-4 text-[#FBD34D]" aria-hidden /> Convidar Amigo no WhatsApp
               </a>
             }
           />
 
-          <div className="space-y-4 p-4">
+          <div className="space-y-5 p-6">
             {elegivelFidelizacao && (
-              <div className="flex items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-                <Gift className="size-5 shrink-0 text-emerald-600" aria-hidden />
-                <div>
-                  <strong>Benefício de Ex-Formando Ativo:</strong> Tem direito a{" "}
-                  <strong>{cfg.descontoFidelizacaoPct}% de Desconto de Fidelização</strong> na sua próxima formação!
-                </div>
-              </div>
+              <Alerta tipo="sucesso">
+                <strong>Benefício de Ex-Formando Ativo:</strong> Tem direito a{" "}
+                <strong>{cfg.descontoFidelizacaoPct}% de Desconto de Fidelização</strong> na sua próxima formação!
+              </Alerta>
             )}
 
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <div className="rounded-lg bg-marca-50/70 p-3">
-                <div className="text-xs font-medium text-marca-800 uppercase">Pontos disponíveis</div>
-                <div className="mt-1 text-xl font-bold text-marca-900">{saldoPontos.saldoDisponivel} pts</div>
-                <div className="text-xs text-marca-700">= {descontoPontosPct}% de desconto</div>
+              <div className="rounded-2xl border border-zinc-200/80 bg-[#FAF9F5] p-4">
+                <div className="text-xs font-medium text-zinc-500">Pontos disponíveis</div>
+                <div className="mt-1.5 text-xl font-bold text-[#1C1D21]">{saldoPontos.saldoDisponivel} pts</div>
+                <div className="mt-0.5 text-xs font-semibold text-[#1E6332]">= {descontoPontosPct}% de desconto</div>
               </div>
-              <div className="rounded-lg bg-slate-50 p-3">
-                <div className="text-xs font-medium text-slate-500 uppercase">Total ganhos</div>
-                <div className="mt-1 text-xl font-semibold text-emerald-700">+{saldoPontos.totalGanhos} pts</div>
-                <div className="text-xs text-slate-500">{indicados.length} amigo(s) indicado(s)</div>
+              <div className="rounded-2xl border border-zinc-200/80 bg-[#FAF9F5] p-4">
+                <div className="text-xs font-medium text-zinc-500">Total ganhos</div>
+                <div className="mt-1.5 text-xl font-bold text-[#1E6332]">+{saldoPontos.totalGanhos} pts</div>
+                <div className="mt-0.5 text-xs text-zinc-500">{indicados.length} amigo(s) indicado(s)</div>
               </div>
-              <div className="rounded-lg bg-slate-50 p-3">
-                <div className="text-xs font-medium text-slate-500 uppercase">Pontos usados</div>
-                <div className="mt-1 text-xl font-semibold text-slate-800">{saldoPontos.totalResgatados} pts</div>
-                <div className="text-xs text-slate-500">Convertidos em desconto</div>
+              <div className="rounded-2xl border border-zinc-200/80 bg-[#FAF9F5] p-4">
+                <div className="text-xs font-medium text-zinc-500">Pontos usados</div>
+                <div className="mt-1.5 text-xl font-bold text-[#1C1D21]">{saldoPontos.totalResgatados} pts</div>
+                <div className="mt-0.5 text-xs text-zinc-500">Convertidos em desconto</div>
               </div>
-              <div className="rounded-lg bg-slate-50 p-3">
-                <div className="text-xs font-medium text-slate-500 uppercase">Validade dos pontos</div>
-                <div className="mt-1 text-xl font-semibold text-slate-800">{cfg.validadePontosMeses} meses</div>
-                <div className="text-xs text-slate-500">{saldoPontos.totalExpirados} pts expirados</div>
+              <div className="rounded-2xl border border-zinc-200/80 bg-[#FAF9F5] p-4">
+                <div className="text-xs font-medium text-zinc-500">Validade dos pontos</div>
+                <div className="mt-1.5 text-xl font-bold text-[#1C1D21]">{cfg.validadePontosMeses} meses</div>
+                <div className="mt-0.5 text-xs text-zinc-500">{saldoPontos.totalExpirados} pts expirados</div>
               </div>
             </div>
           </div>
 
-          <div className="grid divide-y divide-slate-100 border-t border-slate-100 lg:grid-cols-2 lg:divide-x lg:divide-y-0">
+          <div className="grid divide-y divide-dotted divide-zinc-200 border-t border-dotted border-zinc-200 lg:grid-cols-2 lg:divide-x lg:divide-y-0">
             {/* Amigos indicados */}
-            <div>
-              <div className="px-4 py-3 text-xs font-semibold tracking-wide text-slate-500 uppercase">
+            <div className="p-4">
+              <div className="px-2 pb-2 text-xs font-bold tracking-wider text-zinc-500 uppercase">
                 Amigos indicados por si ({indicados.length})
               </div>
               {indicados.length === 0 ? (
@@ -482,12 +540,12 @@ export default async function PortalFormandoPage({ params }: Props) {
                       <Th>Estado</Th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
+                  <TbodyProgressivo colSpan={3}>
                     {indicados.map((ind) => (
-                      <tr key={ind.id}>
-                        <Td className="font-medium text-slate-900">
+                      <tr key={ind.id} className="bg-[#FAF9F5]/70 transition-colors hover:bg-[#FEF3C7]/40">
+                        <Td className="font-semibold text-[#1C1D21]">
                           <span className="inline-flex items-center gap-1.5">
-                            <UserCheck className="size-3.5 text-marca-600" aria-hidden />
+                            <UserCheck className="size-3.5 text-[#1C1D21]" aria-hidden />
                             {ind.nome}
                           </span>
                         </Td>
@@ -503,14 +561,14 @@ export default async function PortalFormandoPage({ params }: Props) {
                         </Td>
                       </tr>
                     ))}
-                  </tbody>
+                  </TbodyProgressivo>
                 </Tabela>
               )}
             </div>
 
             {/* Extrato de pontos */}
-            <div>
-              <div className="px-4 py-3 text-xs font-semibold tracking-wide text-slate-500 uppercase">
+            <div className="p-4">
+              <div className="px-2 pb-2 text-xs font-bold tracking-wider text-zinc-500 uppercase">
                 Extrato de Pontos ({movimentosPontos.length})
               </div>
               {movimentosPontos.length === 0 ? (
@@ -524,28 +582,28 @@ export default async function PortalFormandoPage({ params }: Props) {
                       <Th className="text-right">Pontos</Th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
+                  <TbodyProgressivo colSpan={3}>
                     {movimentosPontos.map((mov) => (
-                      <tr key={mov.id}>
+                      <tr key={mov.id} className="bg-[#FAF9F5]/70 transition-colors hover:bg-[#FEF3C7]/40">
                         <Td className="whitespace-nowrap">
                           {formatData(dataSimples(diaLocal(mov.createdAt)))}
                         </Td>
                         <Td>
-                          <div className="text-slate-800">{mov.motivo}</div>
+                          <div className="font-medium text-[#1C1D21]">{mov.motivo}</div>
                           {mov.expiraEm && mov.pontos > 0 && (
-                            <div className="text-xs text-slate-500">
+                            <div className="text-xs text-zinc-500">
                               Válido até {formatData(dataSimples(diaLocal(mov.expiraEm)))}
                             </div>
                           )}
                         </Td>
-                        <Td className="text-right font-semibold whitespace-nowrap">
-                          <span className={mov.pontos > 0 ? "text-emerald-700" : "text-marca-700"}>
+                        <Td className="text-right font-bold whitespace-nowrap">
+                          <span className={mov.pontos > 0 ? "text-[#1E6332]" : "text-[#1C1D21]"}>
                             {mov.pontos > 0 ? `+${mov.pontos}` : mov.pontos}
                           </span>
                         </Td>
                       </tr>
                     ))}
-                  </tbody>
+                  </TbodyProgressivo>
                 </Tabela>
               )}
             </div>
@@ -571,23 +629,23 @@ export default async function PortalFormandoPage({ params }: Props) {
                   <Th className="text-right">Valor</Th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <TbodyProgressivo colSpan={5}>
                 {pagamentos.map((p) => (
-                  <tr key={p.id}>
+                  <tr key={p.id} className="bg-[#FAF9F5]/70 transition-colors hover:bg-[#FEF3C7]/40">
                     <Td className="whitespace-nowrap">{formatData(p.dataPagamento)}</Td>
                     <Td>
-                      <div className="font-medium text-slate-900">
+                      <div className="font-semibold text-[#1C1D21]">
                         {p.matricula.turma.formacao.nome}
                       </div>
-                      <div className="text-xs text-slate-500">Turma {p.matricula.turma.codigo}</div>
+                      <div className="text-xs text-zinc-500">Turma {p.matricula.turma.codigo}</div>
                     </Td>
                     <Td className="whitespace-nowrap">
-                      <span className="inline-flex items-center gap-1">
-                        <CreditCard className="size-3.5 text-slate-400" aria-hidden />
+                      <span className="inline-flex items-center gap-1.5 font-medium text-[#1C1D21]">
+                        <CreditCard className="size-3.5 text-zinc-400" aria-hidden />
                         {NOMES_METODO[p.metodo]}
                       </span>
                     </Td>
-                    <Td className="text-xs text-slate-600">
+                    <Td className="text-xs text-zinc-600">
                       {[
                         p.referencia ? `Ref.: ${p.referencia}` : null,
                         p.referenciaRecibo ? `Recibo AGT: ${p.referenciaRecibo}` : null,
@@ -595,12 +653,12 @@ export default async function PortalFormandoPage({ params }: Props) {
                         .filter(Boolean)
                         .join(" · ") || "—"}
                     </Td>
-                    <Td className="text-right font-semibold whitespace-nowrap text-emerald-700">
+                    <Td className="text-right font-bold whitespace-nowrap text-[#1E6332]">
                       {formatKz(p.valor)}
                     </Td>
                   </tr>
                 ))}
-              </tbody>
+              </TbodyProgressivo>
             </Tabela>
           )}
         </Card>
