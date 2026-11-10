@@ -1,7 +1,10 @@
 import {
   ArrowLeft,
+  Award,
+  BellRing,
   CalendarDays,
   CreditCard,
+  FileText,
   Gift,
   MessageCircle,
   Pencil,
@@ -13,8 +16,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { BadgeEstadoMensagem } from "@/components/estado-mensagem";
 import { TbodyProgressivo } from "@/components/lista-progressiva";
-import { Badge, Card, CardHeader, LinkButton, Tabela, Td, Th, Vazio } from "@/components/ui";
+import { Alerta, Badge, Card, CardHeader, LinkButton, Tabela, Td, Th, Vazio } from "@/components/ui";
 import { exigir } from "@/lib/auth";
+import { verificarElegibilidadeCertificado } from "@/lib/certificados";
 import { truncar } from "@/lib/configuracoes";
 import { dataSimples, diaLocal, formatData, formatDataHora, hojeLocal } from "@/lib/datas";
 import {
@@ -30,6 +34,7 @@ import { comoCliente, obterConfiguracao } from "@/lib/mensagens/config";
 import { NOMES_TIPO_MENSAGEM } from "@/lib/mensagens/modelos";
 import { formatKz } from "@/lib/money";
 import { comPago, estadoParcela, resumirParcelas } from "@/lib/parcelas";
+import { calcularAssiduidade } from "@/lib/presencas";
 import { pode } from "@/lib/rbac";
 import { calcularSaldoPontos } from "@/lib/retencao";
 import { BotoesPortal } from "../../portais/botoes-portal";
@@ -82,7 +87,24 @@ export default async function FichaFormandoPage({ params }: { params: Promise<{ 
         orderBy: { createdAt: "desc" },
         include: {
           campanha: { select: { id: true, nome: true, descontoPct: true } },
-          turma: { select: { id: true, codigo: true, estado: true, formacao: { select: { id: true, nome: true } } } },
+          certificado: true,
+          turma: {
+            select: {
+              id: true,
+              codigo: true,
+              estado: true,
+              formacao: { select: { id: true, nome: true, cargaHoraria: true } },
+              sessoes: {
+                where: { estado: { not: "CANCELADA" } },
+                select: {
+                  id: true,
+                  inicio: true,
+                  estado: true,
+                  presencas: { select: { matriculaId: true, estado: true } },
+                },
+              },
+            },
+          },
           parcelas: { orderBy: { numero: "asc" }, include: { alocacoes: { select: { valor: true } } } },
         },
       },
@@ -92,8 +114,9 @@ export default async function FichaFormandoPage({ params }: { params: Promise<{ 
 
   const verMensagens = pode(user.perfil, "mensagens:ver");
   const podeGerirMensagens = pode(user.perfil, "mensagens:gerir");
+  const verFinanceiro = pode(user.perfil, "financeiro:ver");
 
-  const [pagamentos, mensagens, cfg] = await Promise.all([
+  const [pagamentos, mensagens, cfg, avisosPendentes] = await Promise.all([
     verPagamentos
       ? db.pagamento.findMany({
           where: { formandoId: f.id },
@@ -112,6 +135,16 @@ export default async function FichaFormandoPage({ params }: { params: Promise<{ 
         })
       : Promise.resolve([]),
     obterConfiguracao(comoCliente(db), user.tenantId),
+    verPagamentos
+      ? db.avisoPagamento.findMany({
+          where: { formandoId: f.id, estado: "PENDENTE" },
+          orderBy: { createdAt: "desc" },
+          include: {
+            matricula: { select: { turma: { select: { codigo: true, formacao: { select: { nome: true } } } } } },
+            parcela: { select: { numero: true } },
+          },
+        })
+      : Promise.resolve([]),
   ]);
 
   const hoje = dataSimples(hojeLocal());
@@ -174,6 +207,39 @@ export default async function FichaFormandoPage({ params }: { params: Promise<{ 
           )}
         </div>
       </div>
+
+      {avisosPendentes.length > 0 && (
+        <Alerta tipo="aviso">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="space-y-1">
+              <div className="inline-flex items-center gap-1.5 font-semibold text-[#1C1D21]">
+                <BellRing className="size-4" aria-hidden />
+                {avisosPendentes.length} comunicação(ões) de pagamento submetida(s) no Portal a aguardar validação:
+              </div>
+              <div className="flex flex-wrap gap-2 text-xs">
+                {avisosPendentes.map((av) => (
+                  <span
+                    key={av.id}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-0.5 font-medium text-[#1C1D21]"
+                  >
+                    <span className="font-mono font-bold">{av.matricula.turma.codigo}</span>
+                    {av.parcela ? ` · #${av.parcela.numero}` : ""} · <strong>{formatKz(av.valor)}</strong> ·{" "}
+                    {NOMES_METODO[av.metodo]} (Ref.: {av.referencia}) em {formatData(av.dataTransferencia)}
+                  </span>
+                ))}
+              </div>
+            </div>
+            {verFinanceiro && (
+              <Link
+                href="/financeiro"
+                className="inline-flex h-8 shrink-0 items-center rounded-full bg-[#1C1D21] px-3.5 text-xs font-semibold text-white hover:bg-zinc-800"
+              >
+                Validar em Caixa e Finanças →
+              </Link>
+            )}
+          </div>
+        </Alerta>
+      )}
 
       {/* Bloco Editorial de Métricas + 3 Pílulas Horizontais Proporcionais (Referência 2) */}
       <div className="rounded-[26px] border border-[#E5E3DC] bg-white/95 p-5 shadow-[0_1px_2px_rgba(28,29,33,0.03),0_10px_28px_-14px_rgba(28,29,33,0.06)] space-y-5">
@@ -296,6 +362,31 @@ export default async function FichaFormandoPage({ params }: { params: Promise<{ 
               const pctPago =
                 mat.valorTotal > 0n ? Math.min(100, Number((resumo.pago * 100n) / mat.valorTotal)) : 100;
 
+              const assiduidade = calcularAssiduidade(
+                mat.turma.sessoes.map((s) => ({
+                  id: s.id,
+                  inicio: s.inicio,
+                  estado: s.estado,
+                  temChamadaLancada: s.presencas.length > 0,
+                  estadoAluno: s.presencas.find((p) => p.matriculaId === mat.id)?.estado ?? null,
+                })),
+              );
+
+              const estadoParaEleg =
+                mat.estado === "ATIVA" && mat.turma.estado === "CONCLUIDA" && resumo.divida <= 0n
+                  ? "CONCLUIDA"
+                  : mat.estado;
+              const elegibilidade = verificarElegibilidadeCertificado({
+                estadoMatricula: estadoParaEleg,
+                dividaCentimos: resumo.divida,
+                assiduidadePct: assiduidade.assiduidadePct,
+                minAssiduidadePct: cfg.minAssiduidadeCertificadoPct,
+                revogado: Boolean(mat.certificado?.revogadoEm),
+              });
+              const certAtivo = mat.certificado && !mat.certificado.revogadoEm ? mat.certificado : null;
+              const mostrarCertificado =
+                Boolean(certAtivo) || mat.estado === "CONCLUIDA" || mat.turma.estado === "CONCLUIDA";
+
               return (
                 <Card key={mat.id} className={cancelada ? "opacity-70" : undefined}>
                   <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#ECEAE3] px-5 py-4">
@@ -316,6 +407,12 @@ export default async function FichaFormandoPage({ params }: { params: Promise<{ 
                       </div>
                       <div className="mt-1 text-xs text-slate-500">
                         Inscrito em {formatData(dataSimples(diaLocal(mat.createdAt)))}
+                        {assiduidade.sessoesComChamada > 0 && (
+                          <>
+                            {" · "}Assiduidade:{" "}
+                            <strong className="text-[#1C1D21]">{assiduidade.assiduidadePct}%</strong>
+                          </>
+                        )}
                         {mat.campanha && (
                           <>
                             {" · "}Campanha:{" "}
@@ -338,6 +435,13 @@ export default async function FichaFormandoPage({ params }: { params: Promise<{ 
                       {verPagamentos && !cancelada && resumo.divida === 0n && (
                         <Badge cor="verde">Plano totalmente pago</Badge>
                       )}
+                      {certAtivo ? (
+                        <Badge cor="verde">Certificado {certAtivo.codigo}</Badge>
+                      ) : mostrarCertificado && !elegibilidade.elegivel ? (
+                        <Badge cor="amarelo">Certificado retido</Badge>
+                      ) : mostrarCertificado && elegibilidade.elegivel ? (
+                        <Badge cor="verde">Elegível p/ Certificado</Badge>
+                      ) : null}
                     </div>
                   </div>
 
@@ -417,8 +521,16 @@ export default async function FichaFormandoPage({ params }: { params: Promise<{ 
                     </>
                   )}
 
-                  {!cancelada && (podeRegistar || podeMatricular) && (
-                    <div className="flex flex-wrap justify-end gap-2 border-t border-[#ECEAE3] px-5 py-3">
+                  {!cancelada && (podeRegistar || podeMatricular || mostrarCertificado) && (
+                    <div className="flex flex-wrap items-center justify-end gap-2 border-t border-[#ECEAE3] px-5 py-3">
+                      {mostrarCertificado && (
+                        <LinkButton
+                          href={`/formandos/${f.id}/certificado/${mat.id}`}
+                          variante={certAtivo || elegibilidade.elegivel ? "secundario" : "fantasma"}
+                        >
+                          <Award className="size-4 text-[#1C1D21]" aria-hidden /> Certificado A4
+                        </LinkButton>
+                      )}
                       {podeMatricular && (
                         <CancelarMatricula matriculaId={mat.id} formando={f.nome} turma={mat.turma.codigo} />
                       )}
@@ -450,9 +562,10 @@ export default async function FichaFormandoPage({ params }: { params: Promise<{ 
                       <Th>Referência / AGT</Th>
                       <Th>Registado por</Th>
                       <Th className="text-right">Valor</Th>
+                      <Th className="text-right">Documento</Th>
                     </tr>
                   </thead>
-                  <TbodyProgressivo passo={10} colSpan={6}>
+                  <TbodyProgressivo passo={10} colSpan={7}>
                     {pagamentos.map((p) => (
                       <tr key={p.id}>
                         <Td className="whitespace-nowrap text-xs font-medium">{formatData(p.dataPagamento)}</Td>
@@ -473,6 +586,14 @@ export default async function FichaFormandoPage({ params }: { params: Promise<{ 
                           {p.notas && <div className="text-[11px] text-slate-500">{p.notas}</div>}
                         </Td>
                         <Td className="text-right font-bold text-[#1C1D21] whitespace-nowrap">{formatKz(p.valor)}</Td>
+                        <Td className="text-right whitespace-nowrap">
+                          <Link
+                            href={`/formandos/${f.id}/recibo/${p.id}`}
+                            className="inline-flex h-8 items-center gap-1 rounded-full border border-[#DDD9CE] bg-[#FAF9F5] px-2.5 text-xs font-semibold text-[#1C1D21] transition-colors hover:border-[#FBD34D] hover:bg-[#FBD34D]/40"
+                          >
+                            <FileText className="size-3.5" aria-hidden /> Comprovativo A4
+                          </Link>
+                        </Td>
                       </tr>
                     ))}
                   </TbodyProgressivo>

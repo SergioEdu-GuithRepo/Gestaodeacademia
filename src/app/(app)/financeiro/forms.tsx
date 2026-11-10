@@ -1,14 +1,20 @@
 "use client";
 
 import type { CategoriaDespesa } from "@prisma/client";
-import { CheckCircle2, Plus, Printer, Trash2 } from "lucide-react";
+import { CheckCircle2, Plus, Printer, Trash2, XCircle } from "lucide-react";
 import { useState, useTransition } from "react";
 import { useFormAcao } from "@/components/form-acao";
 import { ModalConfirmacao } from "@/components/modal-confirmacao";
 import { Alerta, Button, Field, Input, Select, Textarea } from "@/components/ui";
 import { NOMES_CATEGORIA_DESPESA } from "@/lib/financeiro";
 import { centimosParaInput, formatKz } from "@/lib/money";
-import { apagarDespesaAction, liquidarFormadorAction, registarDespesaAction } from "./actions";
+import {
+  apagarDespesaAction,
+  confirmarAvisoPagamentoAction,
+  liquidarFormadorAction,
+  registarDespesaAction,
+  rejeitarAvisoPagamentoAction,
+} from "./actions";
 
 export function BotaoImprimirRelatorio() {
   return (
@@ -307,5 +313,80 @@ export function BotaoApagarDespesa({ despesaId }: { despesaId: string }) {
         }}
       />
     </>
+  );
+}
+
+export function BotoesValidarAvisoPagamento({
+  avisoId,
+  formandoNome,
+  valorFormatado,
+}: {
+  avisoId: string;
+  formandoNome: string;
+  valorFormatado: string;
+}) {
+  const [pendente, iniciar] = useTransition();
+  const [confirmarRejeicao, setConfirmarRejeicao] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+  const [reciboAgt, setReciboAgt] = useState("");
+
+  return (
+    <div className="flex flex-col items-end gap-2 print:hidden">
+      <div className="flex flex-wrap items-center justify-end gap-1.5">
+        <input
+          type="text"
+          value={reciboAgt}
+          onChange={(e) => setReciboAgt(e.target.value)}
+          placeholder="N.º recibo AGT (opc.)"
+          aria-label={`Referência AGT para ${formandoNome}`}
+          disabled={pendente}
+          className="h-8 w-36 rounded-full border border-zinc-200/90 bg-[#FAF9F5] px-3 text-xs text-zinc-800 placeholder:text-zinc-400 focus:border-[#1C1D21] focus:bg-white focus:outline-none"
+        />
+        <Button
+          type="button"
+          variante="primario"
+          disabled={pendente}
+          carregando={pendente}
+          onClick={() => {
+            setErro(null);
+            iniciar(async () => {
+              const res = await confirmarAvisoPagamentoAction(avisoId, reciboAgt || null);
+              if (res?.erro) setErro(res.erro);
+            });
+          }}
+          className="min-h-8 px-3.5 text-xs"
+        >
+          <CheckCircle2 className="size-3.5 text-[#FBD34D]" aria-hidden /> Confirmar e Liquidar
+        </Button>
+        <button
+          type="button"
+          disabled={pendente}
+          onClick={() => setConfirmarRejeicao(true)}
+          className="inline-flex h-8 cursor-pointer items-center gap-1 rounded-full border border-red-200 bg-white px-3 text-xs font-semibold text-[#B42318] transition-colors hover:bg-[#FDECEB] disabled:opacity-50"
+        >
+          <XCircle className="size-3.5" aria-hidden /> Rejeitar
+        </button>
+      </div>
+
+      {erro && <div className="max-w-xs text-right text-xs font-medium text-[#B42318]">{erro}</div>}
+
+      <ModalConfirmacao
+        aberto={confirmarRejeicao}
+        titulo="Rejeitar comunicação de pagamento"
+        mensagem={`Deseja rejeitar a comunicação de ${valorFormatado} submetida por ${formandoNome}? Nenhum pagamento será lançado no plano de parcelas.`}
+        rotuloConfirmar="Rejeitar comunicação"
+        perigo
+        pendente={pendente}
+        aoCancelar={() => setConfirmarRejeicao(false)}
+        aoConfirmar={() => {
+          setErro(null);
+          iniciar(async () => {
+            const res = await rejeitarAvisoPagamentoAction(avisoId);
+            if (res?.erro) setErro(res.erro);
+            setConfirmarRejeicao(false);
+          });
+        }}
+      />
+    </div>
   );
 }

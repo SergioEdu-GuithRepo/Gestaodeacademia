@@ -5,6 +5,7 @@ import {
   GraduationCap,
   MapPin,
   Star,
+  UserCheck,
   Wallet,
 } from "lucide-react";
 import type { Metadata } from "next";
@@ -20,6 +21,7 @@ import { custoSessao } from "@/lib/financeiro";
 import { NOMES_METODO } from "@/lib/formandos";
 import { formatKz } from "@/lib/money";
 import { formatHoras, horasSessao, precoHoraFormador, totalHoras } from "@/lib/precos-formador";
+import { CORES_ESTADO_PRESENCA, NOMES_ESTADO_PRESENCA } from "@/lib/presencas";
 import { FormConfirmarSessaoPortal } from "./forms";
 
 type Props = {
@@ -88,9 +90,20 @@ export default async function PortalFormadorPage({ params }: Props) {
             codigo: true,
             estado: true,
             formacao: { select: { id: true, nome: true, categoria: true } },
+            matriculas: {
+              where: { estado: { not: "CANCELADA" } },
+              orderBy: { formando: { nome: "asc" } },
+              select: {
+                id: true,
+                formando: { select: { nome: true } },
+              },
+            },
           },
         },
         sala: { select: { id: true, nome: true } },
+        presencas: {
+          select: { matriculaId: true, estado: true, observacao: true },
+        },
       },
     }),
     db.despesa.findMany({
@@ -176,7 +189,7 @@ export default async function PortalFormadorPage({ params }: Props) {
                   </h1>
                   <p className="mt-0.5 text-xs text-zinc-300 sm:text-sm">
                     {[formadorBase.email, formadorBase.telefone].filter(Boolean).join(" · ") ||
-                      "Área pessoal de agenda, confirmação de aulas e consulta de honorários."}
+                      "Área pessoal de agenda, confirmação de aulas, chamada nominal e consulta de honorários."}
                   </p>
                 </div>
               </div>
@@ -292,11 +305,11 @@ export default async function PortalFormadorPage({ params }: Props) {
           </Card>
         </div>
 
-        {/* Secção 1: Calendário de Sessões e Confirmação de Horas */}
+        {/* Secção 1: Calendário de Sessões, Chamada Nominal e Confirmação de Horas */}
         <Card>
           <CardHeader
-            titulo="Calendário de Sessões e Confirmação de Horas"
-            descricao="Confirme as sessões lecionadas e registe o sumário da aula para apuramento automático dos seus honorários."
+            titulo="Calendário de Sessões, Chamada Nominal e Confirmação de Horas"
+            descricao="Confirme as sessões lecionadas, registe o sumário da aula e efetue a chamada nominal dos formandos."
           />
 
           <div className="divide-y divide-dotted divide-zinc-200">
@@ -320,6 +333,13 @@ export default async function PortalFormadorPage({ params }: Props) {
                       s.turma.formacao.categoria,
                       overridePorFormacao.get(s.turma.formacao.id) ?? null,
                     );
+                    const mapaPresencas = new Map(s.presencas.map((p) => [p.matriculaId, p.estado]));
+                    const alunosChamada = s.turma.matriculas.map((m) => ({
+                      matriculaId: m.id,
+                      nome: m.formando.nome,
+                      estadoInicial: mapaPresencas.get(m.id) ?? "PRESENTE",
+                    }));
+
                     return (
                       <div
                         key={s.id}
@@ -333,6 +353,7 @@ export default async function PortalFormadorPage({ params }: Props) {
                               </span>
                               <Badge cor="azul">Turma {s.turma.codigo}</Badge>
                               <Badge cor="amarelo">Agendada</Badge>
+                              <Badge cor="cinza">{alunosChamada.length} formando(s)</Badge>
                             </div>
                             <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-zinc-600">
                               <span className="inline-flex items-center gap-1.5 font-semibold text-[#1C1D21]">
@@ -370,6 +391,7 @@ export default async function PortalFormadorPage({ params }: Props) {
                           estadoAtual={s.estado}
                           horasPadrao={duracao}
                           notasAtuais={s.notas}
+                          alunos={alunosChamada}
                         />
                       </div>
                     );
@@ -401,6 +423,18 @@ export default async function PortalFormadorPage({ params }: Props) {
                       overridePorFormacao.get(s.turma.formacao.id) ?? null,
                     );
                     const valor = custoSessao(s, ph);
+                    const mapaPresencas = new Map(s.presencas.map((p) => [p.matriculaId, p.estado]));
+                    const alunosChamada = s.turma.matriculas.map((m) => ({
+                      matriculaId: m.id,
+                      nome: m.formando.nome,
+                      estadoInicial: mapaPresencas.get(m.id) ?? "PRESENTE",
+                    }));
+
+                    const temChamada = s.presencas.length > 0;
+                    const presentesCount = s.presencas.filter((p) => p.estado === "PRESENTE").length;
+                    const faltasCount = s.presencas.filter((p) => p.estado === "FALTA").length;
+                    const justificadasCount = s.presencas.filter((p) => p.estado === "JUSTIFICADA").length;
+
                     return (
                       <div
                         key={s.id}
@@ -437,6 +471,28 @@ export default async function PortalFormadorPage({ params }: Props) {
                           </div>
                         </div>
 
+                        {temChamada && (
+                          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-zinc-200/70 bg-[#FAF9F5] px-3.5 py-2 text-xs">
+                            <span className="inline-flex items-center gap-1.5 font-semibold text-[#1C1D21]">
+                              <UserCheck className="size-3.5 text-[#1C1D21]" aria-hidden />
+                              Chamada nominal:
+                            </span>
+                            <Badge cor={CORES_ESTADO_PRESENCA.PRESENTE}>
+                              {presentesCount} {NOMES_ESTADO_PRESENCA.PRESENTE.toLowerCase()}(s)
+                            </Badge>
+                            {faltasCount > 0 && (
+                              <Badge cor={CORES_ESTADO_PRESENCA.FALTA}>
+                                {faltasCount} {NOMES_ESTADO_PRESENCA.FALTA.toLowerCase()}(s)
+                              </Badge>
+                            )}
+                            {justificadasCount > 0 && (
+                              <Badge cor={CORES_ESTADO_PRESENCA.JUSTIFICADA}>
+                                {justificadasCount} {NOMES_ESTADO_PRESENCA.JUSTIFICADA.toLowerCase()}(s)
+                              </Badge>
+                            )}
+                          </div>
+                        )}
+
                         {s.notas && (
                           <p className="mt-3 rounded-xl bg-[#FAF9F5] px-3.5 py-2.5 text-xs whitespace-pre-line text-zinc-700">
                             <strong className="font-semibold text-[#1C1D21]">Sumário:</strong> {s.notas}
@@ -449,6 +505,7 @@ export default async function PortalFormadorPage({ params }: Props) {
                           estadoAtual={s.estado}
                           horasPadrao={h}
                           notasAtuais={s.notas}
+                          alunos={alunosChamada}
                         />
                       </div>
                     );
@@ -515,7 +572,7 @@ export default async function PortalFormadorPage({ params }: Props) {
           <Card>
             <CardHeader
               titulo="Desempenho Pedagógico"
-              descricao={`Média de ${medias.total} avaliação(ões) realizada(s) pela coordenação pedagógica.`}
+              descricao={`Média de ${medias.total} avaliação(ões) realizada(s) pela coordenação pedagógica e formandos.`}
               acoes={<Badge cor="azul">{formatNota(medias.geral)} / 5.0 ★</Badge>}
             />
             <div className="space-y-3 p-6">

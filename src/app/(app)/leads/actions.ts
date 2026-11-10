@@ -1,6 +1,6 @@
 "use server";
 
-import { Prisma } from "@prisma/client";
+import { Prisma, type TipoInteracaoLead } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { exigir } from "@/lib/auth";
@@ -9,6 +9,7 @@ import { campo, type EstadoForm } from "@/lib/utils";
 function revalidar(id: string) {
   revalidatePath("/leads");
   revalidatePath(`/leads/${id}`);
+  revalidatePath("/inteligencia");
   revalidatePath("/painel");
 }
 
@@ -45,6 +46,64 @@ export async function guardarNotasLead(leadId: string, _prev: EstadoForm, fd: Fo
   await db.lead.update({ where: { id: atual.id }, data: { notas } });
   revalidar(atual.id);
   return { ok: "Notas guardadas." };
+}
+
+const TIPOS_INTERACAO: readonly TipoInteracaoLead[] = ["CHAMADA", "WHATSAPP", "EMAIL", "REUNIAO", "NOTA"];
+
+export async function registarInteracaoLead(leadId: string, _prev: EstadoForm, fd: FormData): Promise<EstadoForm> {
+  const { user, db } = await exigir("leads:editar");
+  const tipoRaw = (campo(fd, "tipo") ?? "WHATSAPP") as TipoInteracaoLead;
+  if (!TIPOS_INTERACAO.includes(tipoRaw)) return { erro: "Tipo de interação inválido." };
+
+  const resumo = campo(fd, "resumo");
+  if (!resumo || resumo.length < 3) {
+    return { erros: { resumo: "Registe um resumo curto (mínimo 3 caracteres)." } };
+  }
+  if (resumo.length > 1500) {
+    return { erros: { resumo: "Máximo de 1500 caracteres." } };
+  }
+
+  const proximoTxt = campo(fd, "proximoFollowUp");
+  let proximoFollowUp: Date | null = null;
+  if (proximoTxt) {
+    const dt = new Date(proximoTxt);
+    if (Number.isNaN(dt.getTime())) {
+      return { erros: { proximoFollowUp: "Data de próximo follow-up inválida." } };
+    }
+    proximoFollowUp = dt;
+  }
+
+  const lead = await db.lead.findFirst({
+    where: { id: leadId },
+    select: { id: true, estado: true, contactadoEm: true },
+  });
+  if (!lead) return { erro: "Lead não encontrado." };
+
+  await db.$transaction(async (tx) => {
+    await tx.interacaoLead.create({
+      data: {
+        tenantId: user.tenantId,
+        leadId: lead.id,
+        userId: user.id,
+        tipo: tipoRaw,
+        resumo,
+        proximoFollowUp,
+      },
+    });
+
+    if (tipoRaw !== "NOTA" && lead.estado === "NOVO") {
+      await tx.lead.update({
+        where: { id: lead.id },
+        data: {
+          estado: "CONTACTADO",
+          contactadoEm: lead.contactadoEm ?? new Date(),
+        },
+      });
+    }
+  });
+
+  revalidar(lead.id);
+  return { ok: "Interação CRM registada com sucesso." };
 }
 
 export async function converterLeadEmFormando(

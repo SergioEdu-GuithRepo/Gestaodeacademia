@@ -6,8 +6,13 @@ import { z } from "zod";
 import { exigir } from "@/lib/auth";
 import { dataSimples } from "@/lib/datas";
 import { CATEGORIAS_DESPESA } from "@/lib/financeiro";
-import { parseKz } from "@/lib/money";
+import { comoCliente } from "@/lib/mensagens/config";
+import { aoRegistarPagamento } from "@/lib/mensagens/eventos";
+import { formatKz, parseKz } from "@/lib/money";
+import { alocarPagamento, comPago } from "@/lib/parcelas";
 import { campo, type EstadoForm } from "@/lib/utils";
+
+class ErroNegocio extends Error {}
 
 const METODOS_VALIDOS: readonly MetodoPagamento[] = [
   "MULTICAIXA",
@@ -149,4 +154,167 @@ export async function apagarDespesaAction(despesaId: string): Promise<void> {
   revalidatePath("/financeiro");
   revalidatePath("/painel");
   revalidatePath("/campanhas");
+}
+
+// ─────────────── Comunicações de Pagamento do Portal (AvisoPagamento) ─────────
+
+export async function confirmarAvisoPagamentoAction(
+  avisoId: string,
+  referenciaRecibo?: string | null,
+): Promise<{ ok?: string; erro?: string }> {
+  const { user, db } = await exigir("pagamentos:registar");
+  if (!avisoId) return { erro: "Identificador da comunicação em falta." };
+
+  const tenantId = user.tenantId;
+  let formandoIdAfetado = "";
+  let turmaIdAfetada = "";
+
+  try {
+    await db.$transaction(async (tx) => {
+      const avisoInicial = await tx.avisoPagamento.findFirst({
+        where: { id: avisoId, tenantId },
+        include: {
+          matricula: {
+            select: {
+              id: true,
+              formandoId: true,
+              turmaId: true,
+              estado: true,
+              turma: { select: { estado: true } },
+            },
+          },
+        },
+      });
+
+      if (!avisoInicial) throw new ErroNegocio("Comunicação de pagamento não encontrada.");
+      if (avisoInicial.estado !== "PENDENTE") {
+        throw new ErroNegocio("Esta comunicação de pagamento já foi analisada.");
+      }
+
+      formandoIdAfetado = avisoInicial.formandoId;
+      turmaIdAfetada = avisoInicial.matricula.turmaId;
+
+      // Bloqueia a matrícula para serializar liquidações concorrentes
+      await tx.$queryRaw`SELECT id FROM "Matricula" WHERE id = ${avisoInicial.matriculaId} AND "tenantId" = ${tenantId} FOR UPDATE`;
+
+      const [aviso, matricula] = await Promise.all([
+        tx.avisoPagamento.findFirst({ where: { id: avisoId, tenantId } }),
+        tx.matricula.findFirst({
+          where: { id: avisoInicial.matriculaId, tenantId },
+          include: { parcelas: { include: { alocacoes: { select: { valor: true } } } } },
+        }),
+      ]);
+
+      if (!aviso || aviso.estado !== "PENDENTE") {
+        throw new ErroNegocio("Esta comunicação de pagamento já foi processada.");
+      }
+      if (!matricula) throw new ErroNegocio("Matrícula não encontrada.");
+      if (matricula.estado === "CANCELADA") {
+        throw new ErroNegocio("Não é possível liquidar pagamentos numa matrícula cancelada.");
+      }
+
+      const parcelas = matricula.parcelas.map(comPago);
+      const divida = parcelas.reduce((s, p) => s + (p.valor > p.pago ? p.valor - p.pago : 0n), 0n);
+
+      if (divida <= 0n) {
+        throw new ErroNegocio("Esta matrícula já se encontra totalmente paga.");
+      }
+      if (aviso.valor <= 0n) {
+        throw new ErroNegocio("O valor comunicado é inválido.");
+      }
+      if (aviso.valor > divida) {
+        throw new ErroNegocio(
+          `O valor comunicado (${formatKz(aviso.valor)}) excede a dívida restante desta matrícula (${formatKz(divida)}).`,
+        );
+      }
+
+      const alocacoes = alocarPagamento(
+        aviso.valor,
+        parcelas.map((p) => ({ id: p.id, numero: p.numero, valor: p.valor, pago: p.pago })),
+      );
+
+      const pagamento = await tx.pagamento.create({
+        data: {
+          tenantId,
+          formandoId: aviso.formandoId,
+          matriculaId: matricula.id,
+          valor: aviso.valor,
+          metodo: aviso.metodo,
+          dataPagamento: aviso.dataTransferencia,
+          referencia: aviso.referencia,
+          referenciaRecibo: referenciaRecibo?.trim() || null,
+          notas: aviso.notas
+            ? `Validado via Portal: ${aviso.notas}`
+            : "Comunicação de pagamento submetida no Portal e validada pela tesouraria.",
+          registadoPorId: user.id,
+          alocacoes: { create: alocacoes },
+        },
+        select: { id: true },
+      });
+
+      if (divida - aviso.valor === 0n && avisoInicial.matricula.turma.estado === "CONCLUIDA" && matricula.estado === "ATIVA") {
+        await tx.matricula.update({
+          where: { id: matricula.id },
+          data: { estado: "CONCLUIDA" },
+        });
+      }
+
+      await tx.avisoPagamento.update({
+        where: { id: aviso.id },
+        data: {
+          estado: "CONFIRMADO",
+          pagamentoGeradoId: pagamento.id,
+          analisadoPorId: user.id,
+          analisadoEm: new Date(),
+        },
+      });
+
+      // Enfileira confirmação automática por WhatsApp na mesma transação
+      await aoRegistarPagamento(comoCliente(tx), {
+        tenantId,
+        pagamentoId: pagamento.id,
+      });
+    });
+  } catch (e) {
+    if (e instanceof ErroNegocio) return { erro: e.message };
+    throw e;
+  }
+
+  revalidatePath("/financeiro");
+  revalidatePath("/painel");
+  revalidatePath("/formandos");
+  if (formandoIdAfetado) revalidatePath(`/formandos/${formandoIdAfetado}`);
+  if (turmaIdAfetada) revalidatePath(`/turmas/${turmaIdAfetada}`);
+  revalidatePath("/mensagens");
+
+  return { ok: "Pagamento confirmado, parcelas liquidadas e recibo WhatsApp enfileirado." };
+}
+
+export async function rejeitarAvisoPagamentoAction(
+  avisoId: string,
+): Promise<{ ok?: string; erro?: string }> {
+  const { user, db } = await exigir("pagamentos:registar");
+  if (!avisoId) return { erro: "Identificador da comunicação em falta." };
+
+  const aviso = await db.avisoPagamento.findFirst({ where: { id: avisoId } });
+  if (!aviso) return { erro: "Comunicação de pagamento não encontrada." };
+  if (aviso.estado !== "PENDENTE") {
+    return { erro: "Esta comunicação de pagamento já foi analisada." };
+  }
+
+  await db.avisoPagamento.update({
+    where: { id: aviso.id },
+    data: {
+      estado: "REJEITADO",
+      analisadoPorId: user.id,
+      analisadoEm: new Date(),
+    },
+  });
+
+  revalidatePath("/financeiro");
+  revalidatePath("/painel");
+  revalidatePath("/formandos");
+  revalidatePath(`/formandos/${aviso.formandoId}`);
+
+  return { ok: "Comunicação de pagamento rejeitada." };
 }

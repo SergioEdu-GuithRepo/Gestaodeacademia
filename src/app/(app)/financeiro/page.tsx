@@ -1,5 +1,5 @@
 import type { CategoriaDespesa } from "@prisma/client";
-import { ArrowUpRight, Download } from "lucide-react";
+import { ArrowUpRight, BellRing, Download } from "lucide-react";
 import Link from "next/link";
 import { GrelhaProgressiva, TbodyProgressivo } from "@/components/lista-progressiva";
 import { Badge, Card, CardHeader, Tabela, Td, Th, Vazio } from "@/components/ui";
@@ -15,12 +15,19 @@ import {
   type DespesaInput,
   type SessaoFinanceiraInput,
 } from "@/lib/financeiro";
+import { NOMES_METODO } from "@/lib/formandos";
 import { formatKz } from "@/lib/money";
 import { comPago, estadoParcela } from "@/lib/parcelas";
 import { formatHoras, horasSessao, precoHoraFormador } from "@/lib/precos-formador";
 import { pode } from "@/lib/rbac";
 import { cn } from "@/lib/utils";
-import { BotaoApagarDespesa, BotaoImprimirRelatorio, FormLiquidarFormador, FormNovaDespesa } from "./forms";
+import {
+  BotaoApagarDespesa,
+  BotaoImprimirRelatorio,
+  BotoesValidarAvisoPagamento,
+  FormLiquidarFormador,
+  FormNovaDespesa,
+} from "./forms";
 
 export const dynamic = "force-dynamic";
 
@@ -54,6 +61,7 @@ export default async function FinanceiroPage({
 }) {
   const { user, db } = await exigir("financeiro:ver");
   const podeEditar = pode(user.perfil, "financeiro:editar");
+  const podeRegistarPagamentos = pode(user.perfil, "pagamentos:registar");
   const sp = await searchParams;
 
   const hojeIso = hojeLocal();
@@ -86,6 +94,7 @@ export default async function FinanceiroPage({
     sessoesPeriodo,
     sessoesFuturas,
     parcelasAbertasRaw,
+    avisosPendentes,
   ] = await Promise.all([
     db.formacao.findMany({
       orderBy: { nome: "asc" },
@@ -227,6 +236,23 @@ export default async function FinanceiroPage({
             turma: { select: { codigo: true, formacao: { select: { nome: true } } } },
           },
         },
+      },
+    }),
+    db.avisoPagamento.findMany({
+      where: { estado: "PENDENTE" },
+      orderBy: { createdAt: "asc" },
+      include: {
+        formando: { select: { id: true, nome: true, whatsapp: true } },
+        matricula: {
+          include: {
+            turma: {
+              include: {
+                formacao: { select: { id: true, nome: true } },
+              },
+            },
+          },
+        },
+        parcela: { select: { id: true, numero: true, valor: true, vencimento: true } },
       },
     }),
   ]);
@@ -509,6 +535,103 @@ export default async function FinanceiroPage({
           </div>
         </div>
       </div>
+
+      {/* Comunicações de Pagamento do Portal (AvisoPagamento) */}
+      <Card
+        className={cn(
+          "print:hidden",
+          avisosPendentes.length > 0 && "border-[#FBD34D] ring-1 ring-[#FBD34D]/60",
+        )}
+      >
+        <CardHeader
+          titulo="Comunicações de Pagamento do Portal"
+          descricao={
+            avisosPendentes.length > 0
+              ? "Transferências e pagamentos comunicados pelos formandos a aguardar validação bancária da tesouraria."
+              : "Sem comunicações de pagamento pendentes no momento."
+          }
+          acoes={
+            <div className="flex items-center gap-2">
+              {avisosPendentes.length > 0 ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-[#FBD34D] px-3 py-1 text-xs font-extrabold text-[#1C1D21]">
+                  <BellRing className="size-3.5" aria-hidden />
+                  {avisosPendentes.length} pendente(s) ·{" "}
+                  {formatKz(avisosPendentes.reduce((s, a) => s + a.valor, 0n))}
+                </span>
+              ) : (
+                <Badge cor="cinza">0 pendentes</Badge>
+              )}
+            </div>
+          }
+        />
+
+        {avisosPendentes.length > 0 && (
+          <Tabela>
+            <thead>
+              <tr>
+                <Th>Formando</Th>
+                <Th>Curso / Turma</Th>
+                <Th>Data Transf.</Th>
+                <Th>Método e Referência</Th>
+                <Th className="text-right">Valor Comunicado</Th>
+                {podeRegistarPagamentos && <Th className="text-right">Validação Tesouraria</Th>}
+              </tr>
+            </thead>
+            <TbodyProgressivo passo={10} colSpan={podeRegistarPagamentos ? 6 : 5}>
+              {avisosPendentes.map((av) => (
+                <tr key={av.id} className="bg-[#FAF9F5]/70 transition-colors hover:bg-[#FBD34D]/15">
+                  <Td>
+                    <div className="flex items-center gap-2.5">
+                      <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[#1C1D21] text-[11px] font-bold text-[#FBD34D]">
+                        {iniciais(av.formando.nome)}
+                      </div>
+                      <div>
+                        <Link
+                          href={`/formandos/${av.formando.id}`}
+                          className="font-semibold text-[#1C1D21] hover:underline"
+                        >
+                          {av.formando.nome}
+                        </Link>
+                        <div className="font-mono text-[11px] text-zinc-500">{av.formando.whatsapp}</div>
+                      </div>
+                    </div>
+                  </Td>
+                  <Td>
+                    <div className="font-medium text-[#1C1D21]">{av.matricula.turma.formacao.nome}</div>
+                    <div className="text-xs text-zinc-500">
+                      Turma <span className="font-mono font-semibold">{av.matricula.turma.codigo}</span>
+                      {av.parcela ? ` · Parcela #${av.parcela.numero}` : ""}
+                    </div>
+                  </Td>
+                  <Td className="whitespace-nowrap text-xs text-zinc-700">
+                    <div>{formatData(av.dataTransferencia)}</div>
+                    <div className="text-[11px] text-zinc-400">Submetido {formatDataHora(av.createdAt)}</div>
+                  </Td>
+                  <Td className="text-xs">
+                    <Badge cor="cinza">{NOMES_METODO[av.metodo]}</Badge>
+                    <div className="mt-1 font-mono text-xs font-semibold text-[#1C1D21]">
+                      Ref.: {av.referencia}
+                    </div>
+                    {av.notas && <div className="mt-0.5 text-[11px] text-zinc-500">{av.notas}</div>}
+                  </Td>
+                  <Td className="text-right font-bold whitespace-nowrap text-[#1C1D21]">
+                    {formatKz(av.valor)}
+                  </Td>
+                  {podeRegistarPagamentos && (
+                    <Td className="text-right">
+                      <BotoesValidarAvisoPagamento
+                        avisoId={av.id}
+                        formandoNome={av.formando.nome}
+                        valorFormatado={formatKz(av.valor)}
+                      />
+                    </Td>
+                  )}
+                </tr>
+              ))}
+            </TbodyProgressivo>
+          </Tabela>
+        )}
+      </Card>
 
       {/* Formulário rápido para registar despesa (visível para ADMIN e FINANCEIRO) */}
       {podeEditar && (

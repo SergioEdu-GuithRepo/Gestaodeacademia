@@ -92,6 +92,11 @@ model Tenant {
   movimentosPontos MovimentoPontos[]
   campanhas        Campanha[]
   despesas         Despesa[]
+  presencas        Presenca[]
+  certificados     Certificado[]
+  avisosPagamento  AvisoPagamento[]
+  interacoesLead   InteracaoLead[]
+  relatoriosIa     RelatorioIA[]
 }
 
 model User {
@@ -105,10 +110,14 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  tenant     Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  sessoes    UserSession[]
-  pagamentos Pagamento[]
-  despesas   Despesa[]
+  tenant              Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sessoes             UserSession[]
+  pagamentos          Pagamento[]
+  despesas            Despesa[]
+  certificados        Certificado[]
+  avisosAnalisados    AvisoPagamento[]
+  interacoesLead      InteracaoLead[]
+  relatoriosGerados   RelatorioIA[]
 
   @@index([tenantId])
 }
@@ -194,6 +203,7 @@ model Formador {
   avaliacoes   AvaliacaoFormador[]
   sessoes      Sessao[]
   despesas     Despesa[]
+  relatoriosIa RelatorioIA[]
 
   @@index([tenantId, nome])
 }
@@ -226,12 +236,15 @@ model AvaliacaoFormador {
   capacidadeMotivar       Int
   comentario              String?
   avaliadoPor             String?
+  /// Hash anónimo (HMAC/SHA-256) para impedir voto duplo do mesmo formando na mesma turma/formador
+  chaveAnonima            String?
   createdAt               DateTime @default(now())
 
   tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   formador Formador @relation(fields: [formadorId], references: [id], onDelete: Cascade)
   turma    Turma?   @relation(fields: [turmaId], references: [id], onDelete: SetNull)
 
+  @@unique([tenantId, chaveAnonima])
   @@index([formadorId])
 }
 
@@ -255,8 +268,9 @@ model Formacao {
   turmas    Turma[]
   precos    PrecoFormadorFormacao[]
   leads     Lead[]
-  campanhas Campanha[]
-  despesas  Despesa[]
+  campanhas    Campanha[]
+  despesas     Despesa[]
+  relatoriosIa RelatorioIA[]
 
   @@unique([tenantId, slug])
 }
@@ -312,10 +326,11 @@ model Sessao {
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 
-  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  turma    Turma    @relation(fields: [turmaId], references: [id], onDelete: Cascade)
-  formador Formador @relation(fields: [formadorId], references: [id], onDelete: Restrict)
-  sala     Sala     @relation(fields: [salaId], references: [id], onDelete: Restrict)
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  turma     Turma      @relation(fields: [turmaId], references: [id], onDelete: Cascade)
+  formador  Formador   @relation(fields: [formadorId], references: [id], onDelete: Restrict)
+  sala      Sala       @relation(fields: [salaId], references: [id], onDelete: Restrict)
+  presencas Presenca[]
 
   @@index([tenantId, inicio])
   @@index([turmaId])
@@ -355,6 +370,7 @@ model Formando {
   leads            Lead[]
   movimentosPontos MovimentoPontos[] @relation("PontosFormando")
   pontosGerados    MovimentoPontos[] @relation("PontosPorIndicado")
+  avisosPagamento  AvisoPagamento[]
 
   @@unique([tenantId, whatsapp])
   @@index([tenantId, nome])
@@ -387,6 +403,9 @@ model Matricula {
   parcelas         Parcela[]
   pagamentos       Pagamento[]
   movimentosPontos MovimentoPontos[]
+  presencas        Presenca[]
+  certificado      Certificado?
+  avisosPagamento  AvisoPagamento[]
 
   @@unique([formandoId, turmaId])
   @@index([tenantId])
@@ -401,9 +420,10 @@ model Parcela {
   valor       BigInt
   vencimento  DateTime @db.Date
 
-  tenant    Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  matricula Matricula           @relation(fields: [matriculaId], references: [id], onDelete: Cascade)
-  alocacoes AlocacaoPagamento[]
+  tenant          Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  matricula       Matricula           @relation(fields: [matriculaId], references: [id], onDelete: Cascade)
+  alocacoes       AlocacaoPagamento[]
+  avisosPagamento AvisoPagamento[]
 
   @@unique([matriculaId, numero])
   @@index([tenantId, vencimento])
@@ -425,11 +445,12 @@ model Pagamento {
   registadoPorId   String?
   createdAt        DateTime        @default(now())
 
-  tenant       Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  formando     Formando            @relation(fields: [formandoId], references: [id], onDelete: Restrict)
-  matricula    Matricula           @relation(fields: [matriculaId], references: [id], onDelete: Restrict)
-  registadoPor User?               @relation(fields: [registadoPorId], references: [id], onDelete: SetNull)
-  alocacoes    AlocacaoPagamento[]
+  tenant          Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  formando        Formando            @relation(fields: [formandoId], references: [id], onDelete: Restrict)
+  matricula       Matricula           @relation(fields: [matriculaId], references: [id], onDelete: Restrict)
+  registadoPor    User?               @relation(fields: [registadoPorId], references: [id], onDelete: SetNull)
+  alocacoes       AlocacaoPagamento[]
+  avisosOrigem    AvisoPagamento[]
 
   @@index([tenantId, dataPagamento])
   @@index([formandoId])
@@ -468,6 +489,8 @@ enum TipoMensagem {
   ANIVERSARIO
   NOVO_LEAD
   CAMPANHA
+  RELATORIO_IA
+  ALERTA_IA
   MANUAL
   TESTE
 }
@@ -524,6 +547,32 @@ model ConfiguracaoCentro {
   percentagemPorPonto        Int @default(1)
   limiteDescontoIndicacaoPct Int @default(20)
   validadePontosMeses        Int @default(12)
+
+  /// Fase 5: Dados Bancários (IBAN / Express) e Certificados
+  bancoNome                    String?
+  iban                         String?
+  titularConta                 String?
+  multicaixaExpress            String?
+  minAssiduidadeCertificadoPct Int     @default(75)
+
+  /// Fase 5: CRM, Inteligência Analítica e Relatórios Gerados por IA (Claude)
+  iaAtiva                         Boolean               @default(true)
+  /// Cifrada com APP_SECRET (fallback para ANTHROPIC_API_KEY global)
+  anthropicApiKey                 String?
+  modeloClaude                    String                @default("claude-sonnet-4-20250514")
+  relatorioSemanalAtivo           Boolean               @default(true)
+  diaSemanaRelatorio              Int                   @default(1)
+  relatorioMensalAtivo            Boolean               @default(true)
+  diaMesRelatorio                 Int                   @default(1)
+  horaRelatorio                   Int                   @default(8)
+  alertasImediatosAtivos          Boolean               @default(true)
+  limiarInadimplenciaPct          Int                   @default(20)
+  canalRelatorio                  CanalEntregaRelatorio @default(WHATSAPP)
+  destinatariosWhatsappRelatorio  String[]              @default([])
+  destinatariosEmailRelatorio     String[]              @default([])
+  /// Cifrada com APP_SECRET (fallback para RESEND_API_KEY global)
+  resendApiKey                    String?
+  emailRemetente                  String?
 
   updatedAt DateTime @updatedAt
 
@@ -617,11 +666,12 @@ model Lead {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  formacao  Formacao   @relation(fields: [formacaoId], references: [id], onDelete: Restrict)
-  turma     Turma?     @relation(fields: [turmaId], references: [id], onDelete: SetNull)
-  formando  Formando?  @relation(fields: [formandoId], references: [id], onDelete: SetNull)
-  mensagens Mensagem[]
+  tenant     Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  formacao   Formacao        @relation(fields: [formacaoId], references: [id], onDelete: Restrict)
+  turma      Turma?          @relation(fields: [turmaId], references: [id], onDelete: SetNull)
+  formando   Formando?       @relation(fields: [formandoId], references: [id], onDelete: SetNull)
+  mensagens  Mensagem[]
+  interacoes InteracaoLead[]
 
   @@index([tenantId, estado, createdAt])
   @@index([tenantId, whatsapp])
@@ -744,4 +794,168 @@ model Despesa {
   @@index([tenantId, categoria])
   @@index([tenantId, formacaoId])
   @@index([tenantId, formadorId])
+}
+
+// ═══════════════════════════════ FASE 5 ═══════════════════════════════════
+// Assiduidade nominal, Certificados QR, Avisos de Pagamento, CRM e Relatórios IA.
+
+enum EstadoPresenca {
+  PRESENTE
+  FALTA
+  JUSTIFICADA
+}
+
+enum EstadoAvisoPagamento {
+  PENDENTE
+  CONFIRMADO
+  REJEITADO
+}
+
+enum TipoInteracaoLead {
+  CHAMADA
+  WHATSAPP
+  EMAIL
+  REUNIAO
+  NOTA
+}
+
+enum TipoRelatorioIA {
+  SEMANAL_COMERCIAL
+  MENSAL_FINANCEIRO
+  POR_FORMACAO
+  POR_FORMADOR
+  ALERTA_IMEDIATO
+}
+
+enum CanalEntregaRelatorio {
+  APENAS_SISTEMA
+  WHATSAPP
+  EMAIL
+  AMBOS
+}
+
+/// Registo nominal de presença do formando numa sessão específica da turma
+model Presenca {
+  id          String         @id @default(cuid())
+  tenantId    String
+  sessaoId    String
+  matriculaId String
+  estado      EstadoPresenca @default(PRESENTE)
+  observacao  String?
+  updatedAt   DateTime       @updatedAt
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sessao    Sessao    @relation(fields: [sessaoId], references: [id], onDelete: Cascade)
+  matricula Matricula @relation(fields: [matriculaId], references: [id], onDelete: Cascade)
+
+  @@unique([sessaoId, matriculaId])
+  @@index([tenantId, matriculaId])
+}
+
+/// Certificado de conclusão emitido com código público verificável por QR Code
+model Certificado {
+  id              String    @id @default(cuid())
+  tenantId        String
+  matriculaId     String    @unique
+  codigo          String    @unique
+  cargaHoraria    Int
+  assiduidadePct  Int
+  emitidoEm       DateTime  @default(now())
+  emitidoPorId    String?
+  revogadoEm      DateTime?
+  motivoRevogacao String?
+
+  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  matricula  Matricula @relation(fields: [matriculaId], references: [id], onDelete: Cascade)
+  emitidoPor User?     @relation(fields: [emitidoPorId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, emitidoEm])
+}
+
+/// Comunicação de pagamento submetida pelo formando no Portal para validação da tesouraria
+model AvisoPagamento {
+  id                String               @id @default(cuid())
+  tenantId          String
+  formandoId        String
+  matriculaId       String
+  parcelaId         String?
+  valor             BigInt
+  metodo            MetodoPagamento      @default(TRANSFERENCIA)
+  referencia        String
+  dataTransferencia DateTime             @db.Date
+  notas             String?
+  estado            EstadoAvisoPagamento @default(PENDENTE)
+  pagamentoGeradoId String?
+  analisadoPorId    String?
+  analisadoEm       DateTime?
+  createdAt         DateTime             @default(now())
+
+  tenant          Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  formando        Formando   @relation(fields: [formandoId], references: [id], onDelete: Cascade)
+  matricula       Matricula  @relation(fields: [matriculaId], references: [id], onDelete: Cascade)
+  parcela         Parcela?   @relation(fields: [parcelaId], references: [id], onDelete: SetNull)
+  pagamentoGerado Pagamento? @relation(fields: [pagamentoGeradoId], references: [id], onDelete: SetNull)
+  analisadoPor    User?      @relation(fields: [analisadoPorId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, estado, createdAt])
+  @@index([matriculaId])
+}
+
+/// Registo CRM de contacto, notas e agendamento de próximo follow-up de um lead
+model InteracaoLead {
+  id              String            @id @default(cuid())
+  tenantId        String
+  leadId          String
+  userId          String?
+  tipo            TipoInteracaoLead @default(WHATSAPP)
+  resumo          String
+  proximoFollowUp DateTime?
+  createdAt       DateTime          @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user   User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, proximoFollowUp])
+  @@index([leadId, createdAt])
+}
+
+/// Histórico de relatórios analíticos e alertas gerados por IA a partir de dados SQL
+model RelatorioIA {
+  id                    String                @id @default(cuid())
+  tenantId              String
+  tipo                  TipoRelatorioIA
+  titulo                String
+  periodoInicio         DateTime
+  periodoFim            DateTime
+  periodoAnteriorInicio DateTime?
+  periodoAnteriorFim    DateTime?
+  formacaoId            String?
+  formadorId            String?
+  chaveIdempotencia     String?
+  /// Snapshot determinístico dos indicadores calculados via SQL/BD (a IA nunca calcula)
+  metricasSql           Json
+  /// Secções fixas obrigatórias para comparabilidade histórica
+  resumoExecutivo       String
+  variacoesPeriodo      String
+  pontosAtencao         String
+  acoesRecomendadas     String
+  mensagemCurtaWhatsapp String
+  corpoEmailHtml        String
+  modeloUtilizado       String
+  canalSolicitado       CanalEntregaRelatorio
+  entregueWhatsapp      Boolean               @default(false)
+  entregueEmail         Boolean               @default(false)
+  erroEntrega           String?
+  geradoPorId           String?
+  createdAt             DateTime              @default(now())
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  formacao  Formacao? @relation(fields: [formacaoId], references: [id], onDelete: SetNull)
+  formador  Formador? @relation(fields: [formadorId], references: [id], onDelete: SetNull)
+  geradoPor User?     @relation(fields: [geradoPorId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, chaveIdempotencia])
+  @@index([tenantId, tipo, createdAt])
+  @@index([tenantId, createdAt])
 }

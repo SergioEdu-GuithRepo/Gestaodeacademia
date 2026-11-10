@@ -232,3 +232,11 @@ select:user-invalid,
 textarea:user-invalid {
   @apply border-red-400;
 }
+
+@media print {
+  body {
+    background: #ffffff !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

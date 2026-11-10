@@ -47,10 +47,16 @@ const MODELOS_TENANT = new Set<string>([
   "MovimentoPontos",
   "Campanha",
   "Despesa",
+  // Fase 5
+  "Presenca",
+  "Certificado",
+  "AvisoPagamento",
+  "InteracaoLead",
+  "RelatorioIA",
 ]);
 
 /** Modelos com escrita frequente e sem valor de auditoria. */
-const SEM_AUDITORIA = new Set<string>(["AuditLog", "Mensagem"]);
+const SEM_AUDITORIA = new Set<string>(["AuditLog", "Mensagem", "Presenca"]);
 
 const OPERACOES_FILTRO = new Set([
   "findUnique",
@@ -80,7 +86,15 @@ const OPERACOES_ESCRITA = new Set([
   "deleteMany",
 ]);
 
-const CAMPOS_SENSIVEIS = new Set(["passwordHash", "tokenHash", "evolutionApiKey", "webhookToken", "portalToken"]);
+const CAMPOS_SENSIVEIS = new Set([
+  "passwordHash",
+  "tokenHash",
+  "evolutionApiKey",
+  "anthropicApiKey",
+  "resendApiKey",
+  "webhookToken",
+  "portalToken",
+]);
 
 /** Converte valores para JSON seguro (bigint/Decimal → string, remove segredos). */
 function paraJson(valor: unknown): Prisma.InputJsonValue | undefined {
@@ -116,10 +130,13 @@ export async function ativarRlsTransacao(
  */
 export function comRls<T>(tenantId: string, fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
   if (!tenantId) throw new Error("tenantId em falta");
-  return prisma.$transaction(async (tx) => {
-    await ativarRlsTransacao(tx, tenantId);
-    return fn(tx);
-  });
+  return prisma.$transaction(
+    async (tx) => {
+      await ativarRlsTransacao(tx, tenantId);
+      return fn(tx);
+    },
+    { maxWait: 10_000, timeout: 25_000 },
+  );
 }
 
 function criarClienteTenant(ctx: ContextoTenant) {
@@ -191,10 +208,13 @@ export function dbTenant(ctx: ContextoTenant) {
         return async (arg: any, options?: any) => {
           if (typeof arg === "function") {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            return (target.$transaction as any)(async (tx: any) => {
-              await ativarRlsTransacao(tx, tenantId);
-              return arg(tx);
-            }, options);
+            return (target.$transaction as any)(
+              async (tx: Prisma.TransactionClient) => {
+                await ativarRlsTransacao(tx, tenantId);
+                return arg(tx);
+              },
+              { maxWait: 10_000, timeout: 25_000, ...options },
+            );
           }
           if (Array.isArray(arg)) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any

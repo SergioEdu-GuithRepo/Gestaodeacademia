@@ -1,7 +1,8 @@
-import { ArrowLeft, CheckCircle2, Globe2, MessageCircle } from "lucide-react";
+import { ArrowLeft, CalendarClock, CheckCircle2, Globe2, MessageCircle } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Badge, Card, CardHeader, LinkButton } from "@/components/ui";
+import { GrelhaProgressiva } from "@/components/lista-progressiva";
+import { Badge, Card, CardHeader, LinkButton, Vazio } from "@/components/ui";
 import { exigir } from "@/lib/auth";
 import { formatDataHora } from "@/lib/datas";
 import { linkWhatsapp } from "@/lib/formandos";
@@ -9,8 +10,16 @@ import { CORES_ESTADO_LEAD, NOMES_ESTADO_LEAD } from "@/lib/leads";
 import { origemLead } from "@/lib/mensagens/eventos";
 import { formatKz } from "@/lib/money";
 import { pode } from "@/lib/rbac";
-import { converterLeadEmFormando, guardarNotasLead, marcarEstadoLead } from "../actions";
-import { BotaoAcaoLead, BotaoConverterLead, NotasLeadForm } from "../lead-forms";
+import { converterLeadEmFormando, guardarNotasLead, marcarEstadoLead, registarInteracaoLead } from "../actions";
+import { BotaoAcaoLead, BotaoConverterLead, InteracaoLeadForm, NotasLeadForm } from "../lead-forms";
+
+const NOMES_INTERACAO = {
+  WHATSAPP: "WhatsApp",
+  CHAMADA: "Chamada",
+  REUNIAO: "Reunião / Presencial",
+  EMAIL: "E-mail",
+  NOTA: "Nota Interna",
+} as const;
 
 export const metadata = { title: "Ficha do lead" };
 
@@ -32,6 +41,10 @@ export default async function DetalheLeadPage({ params }: { params: Promise<{ id
       formacao: { select: { id: true, nome: true } },
       turma: { select: { id: true, codigo: true } },
       formando: { select: { id: true, nome: true } },
+      interacoes: {
+        orderBy: { createdAt: "desc" },
+        include: { user: { select: { nome: true } } },
+      },
     },
   });
   if (!lead) notFound();
@@ -157,12 +170,52 @@ export default async function DetalheLeadPage({ params }: { params: Promise<{ id
 
       {/* Grelha Assimétrica de 2 Colunas */}
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_350px]">
-        {/* Coluna Esquerda: Acompanhamento Comercial */}
+        {/* Coluna Esquerda: CRM Timeline + Notas */}
         <div className="space-y-6">
           <Card>
             <CardHeader
-              titulo="Acompanhamento Comercial"
-              descricao="Registe observações do contacto telefónico ou de WhatsApp com o candidato."
+              titulo={`Cronologia CRM e Follow-up (${lead.interacoes.length})`}
+              descricao="Registe chamadas, WhatsApp, reuniões e agende o próximo contacto comercial."
+            />
+            {podeEditar && <InteracaoLeadForm acao={registarInteracaoLead.bind(null, lead.id)} />}
+
+            <div className="border-t border-dotted border-zinc-200 p-5">
+              {lead.interacoes.length === 0 ? (
+                <Vazio>Nenhuma interação registada ainda neste lead.</Vazio>
+              ) : (
+                <GrelhaProgressiva passo={10} labelItem="interações" className="space-y-3">
+                  {lead.interacoes.map((it) => (
+                    <div
+                      key={it.id}
+                      className="rounded-2xl border border-zinc-200/80 bg-[#FAF9F5] p-4 text-xs"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <Badge cor="azul">{NOMES_INTERACAO[it.tipo]}</Badge>
+                          <span className="font-semibold text-[#1C1D21]">
+                            {it.user?.nome ?? "Equipa Comercial"}
+                          </span>
+                        </div>
+                        <span className="text-zinc-500">{formatDataHora(it.createdAt)}</span>
+                      </div>
+                      <p className="mt-2 whitespace-pre-line text-sm text-[#1C1D21]">{it.resumo}</p>
+                      {it.proximoFollowUp && (
+                        <div className="mt-2.5 inline-flex items-center gap-1.5 rounded-full bg-[#FBD34D]/50 px-3 py-1 text-[11px] font-bold text-[#1C1D21]">
+                          <CalendarClock className="size-3.5" aria-hidden />
+                          Próximo follow-up: {formatDataHora(it.proximoFollowUp)}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </GrelhaProgressiva>
+              )}
+            </div>
+          </Card>
+
+          <Card>
+            <CardHeader
+              titulo="Notas Fixas do Lead"
+              descricao="Observações gerais do perfil do candidato."
             />
             {podeEditar ? (
               <NotasLeadForm acao={guardarNotasLead.bind(null, lead.id)} notasIniciais={lead.notas ?? ""} />

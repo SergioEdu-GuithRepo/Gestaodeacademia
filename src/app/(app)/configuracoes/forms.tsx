@@ -736,3 +736,368 @@ export function PasswordForm({ acao, nome }: { acao: Acao; nome: string }) {
     </details>
   );
 }
+
+// ── Dados Bancários e Regra de Certificados ──────────────────────────────────
+
+export function BancariosCertificadosForm({
+  acao,
+  valores,
+}: {
+  acao: Acao;
+  valores: {
+    bancoNome: string;
+    iban: string;
+    titularConta: string;
+    multicaixaExpress: string;
+    minAssiduidadeCertificadoPct: number;
+  };
+}) {
+  const { estado, pendente, ref, onSubmit } = useFormAcao(acao);
+  const e = estado?.erros ?? {};
+
+  return (
+    <form ref={ref} onSubmit={onSubmit} className="space-y-6 p-6">
+      <Mensagens estado={estado} />
+
+      <section className="space-y-4">
+        <h3 className="text-sm font-bold text-zinc-900">
+          1. Coordenadas Bancárias e Multicaixa Express (Portal do Formando)
+        </h3>
+        <p className="text-xs text-zinc-500">
+          Estes dados aparecem no Portal do Formando junto das parcelas em aberto para facilitar transferências e envio
+          do comprovativo/referência à tesouraria.
+        </p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Banco" htmlFor="bc-banco" erro={e.bancoNome}>
+            <Input
+              id="bc-banco"
+              name="bancoNome"
+              defaultValue={valores.bancoNome}
+              placeholder="Ex.: Banco BAI / BFA / Atlântico"
+            />
+          </Field>
+          <Field label="Titular da Conta" htmlFor="bc-titular" erro={e.titularConta}>
+            <Input
+              id="bc-titular"
+              name="titularConta"
+              defaultValue={valores.titularConta}
+              placeholder="Ex.: Academia Demo Luanda, Lda."
+            />
+          </Field>
+          <Field label="IBAN" htmlFor="bc-iban" erro={e.iban}>
+            <Input
+              id="bc-iban"
+              name="iban"
+              defaultValue={valores.iban}
+              placeholder="AO06 0040 0000 0000 0000 0000 0"
+            />
+          </Field>
+          <Field
+            label="Número Multicaixa Express"
+            htmlFor="bc-express"
+            erro={e.multicaixaExpress}
+            ajuda="Número associado a transferências por telemóvel no Express."
+          >
+            <Input
+              id="bc-express"
+              name="multicaixaExpress"
+              defaultValue={valores.multicaixaExpress}
+              placeholder="+244 923 000 000"
+            />
+          </Field>
+        </div>
+      </section>
+
+      <section className="space-y-4 border-t border-dotted border-zinc-200 pt-6">
+        <h3 className="text-sm font-bold text-zinc-900">
+          2. Critério de Emissão de Certificados com QR Code
+        </h3>
+        <div className="max-w-sm">
+          <Field
+            label="Assiduidade mínima obrigatória (%)"
+            htmlFor="bc-assid"
+            erro={e.minAssiduidadeCertificadoPct}
+            ajuda="O certificado só é libertado quando a matrícula está Concluída, sem dívida (100% paga) e com assiduidade igual ou superior a esta meta."
+          >
+            <Input
+              id="bc-assid"
+              name="minAssiduidadeCertificadoPct"
+              type="number"
+              min={0}
+              max={100}
+              required
+              defaultValue={valores.minAssiduidadeCertificadoPct}
+            />
+          </Field>
+        </div>
+      </section>
+
+      <Button type="submit" disabled={pendente}>
+        {pendente ? "A guardar…" : "Guardar dados bancários e certificados"}
+      </Button>
+    </form>
+  );
+}
+
+// ── Relatórios Automáticos IA (Claude) ───────────────────────────────────────
+
+export function RelatoriosIaConfigForm({
+  acao,
+  valores,
+}: {
+  acao: Acao;
+  valores: {
+    iaAtiva: boolean;
+    temChaveClaudePropria: boolean;
+    chaveClaudeMascarada: string;
+    temChaveClaudeGlobal: boolean;
+    modeloClaude: string;
+    relatorioSemanalAtivo: boolean;
+    diaSemanaRelatorio: number;
+    relatorioMensalAtivo: boolean;
+    diaMesRelatorio: number;
+    horaRelatorio: number;
+    alertasImediatosAtivos: boolean;
+    limiarInadimplenciaPct: number;
+    canalRelatorio: string;
+    destinatariosWhatsappRelatorio: string;
+    destinatariosEmailRelatorio: string;
+    temChaveEmailPropria: boolean;
+    chaveEmailMascarada: string;
+    emailRemetente: string;
+  };
+}) {
+  const { estado, pendente, ref, onSubmit } = useFormAcao(acao);
+  const e = estado?.erros ?? {};
+
+  return (
+    <form ref={ref} onSubmit={onSubmit} className="space-y-6 p-6">
+      <Mensagens estado={estado} />
+
+      <div className="rounded-2xl border border-zinc-200/90 bg-[#FAF9F5] p-4 text-xs text-zinc-600">
+        <strong className="text-[#1C1D21]">Regra de rigor analítico:</strong> Todos os indicadores financeiros,
+        conversão, inadimplência, ocupação e risco de desistência são calculados por{" "}
+        <strong className="text-[#1C1D21]">SQL na base de dados</strong> isolada deste centro. A IA do Claude recebe os
+        valores já calculados apenas para interpretar variações, apontar riscos e recomendar ações nas 4 secções fixas.
+      </div>
+
+      <section className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-bold text-zinc-900">1. Agendamento e Frequência</h3>
+          <label className="flex items-center gap-2 rounded-full bg-[#FAF9F5] px-3.5 py-1.5 text-xs font-semibold text-[#1C1D21] ring-1 ring-zinc-200">
+            <input
+              type="checkbox"
+              name="iaAtiva"
+              defaultChecked={valores.iaAtiva}
+              className="size-4 accent-[#1C1D21]"
+            />
+            Motor automático ativo
+          </label>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-3">
+          <div className="rounded-2xl border border-zinc-200/80 bg-[#FAF9F5] p-4 space-y-3">
+            <label className="flex items-center gap-2 text-xs font-bold text-[#1C1D21]">
+              <input
+                type="checkbox"
+                name="relatorioSemanalAtivo"
+                defaultChecked={valores.relatorioSemanalAtivo}
+                className="size-4 accent-[#1C1D21]"
+              />
+              Semanal Comercial &amp; CRM
+            </label>
+            <Field label="Dia da semana" htmlFor="ia-diasem" erro={e.diaSemanaRelatorio}>
+              <Select id="ia-diasem" name="diaSemanaRelatorio" defaultValue={String(valores.diaSemanaRelatorio)}>
+                <option value="1">Segunda-feira</option>
+                <option value="2">Terça-feira</option>
+                <option value="3">Quarta-feira</option>
+                <option value="4">Quinta-feira</option>
+                <option value="5">Sexta-feira</option>
+                <option value="6">Sábado</option>
+                <option value="0">Domingo</option>
+              </Select>
+            </Field>
+          </div>
+
+          <div className="rounded-2xl border border-zinc-200/80 bg-[#FAF9F5] p-4 space-y-3">
+            <label className="flex items-center gap-2 text-xs font-bold text-[#1C1D21]">
+              <input
+                type="checkbox"
+                name="relatorioMensalAtivo"
+                defaultChecked={valores.relatorioMensalAtivo}
+                className="size-4 accent-[#1C1D21]"
+              />
+              Mensal Financeiro
+            </label>
+            <Field label="Dia do mês (1–28)" htmlFor="ia-diames" erro={e.diaMesRelatorio}>
+              <Input
+                id="ia-diames"
+                name="diaMesRelatorio"
+                type="number"
+                min={1}
+                max={28}
+                defaultValue={valores.diaMesRelatorio}
+              />
+            </Field>
+          </div>
+
+          <div className="rounded-2xl border border-zinc-200/80 bg-[#FAF9F5] p-4 space-y-3">
+            <label className="flex items-center gap-2 text-xs font-bold text-[#1C1D21]">
+              <input
+                type="checkbox"
+                name="alertasImediatosAtivos"
+                defaultChecked={valores.alertasImediatosAtivos}
+                className="size-4 accent-[#1C1D21]"
+              />
+              Alertas Imediatos de Anomalia
+            </label>
+            <Field
+              label="Disparar se inadimplência ≥ (%)"
+              htmlFor="ia-limiar"
+              erro={e.limiarInadimplenciaPct}
+            >
+              <Input
+                id="ia-limiar"
+                name="limiarInadimplenciaPct"
+                type="number"
+                min={1}
+                max={100}
+                defaultValue={valores.limiarInadimplenciaPct}
+              />
+            </Field>
+          </div>
+        </div>
+
+        <div className="max-w-xs">
+          <Field label="Hora preferencial de disparo (Luanda, 0–23h)" htmlFor="ia-hora" erro={e.horaRelatorio}>
+            <Input id="ia-hora" name="horaRelatorio" type="number" min={0} max={23} defaultValue={valores.horaRelatorio} />
+          </Field>
+        </div>
+      </section>
+
+      <section className="space-y-4 border-t border-dotted border-zinc-200 pt-6">
+        <h3 className="text-sm font-bold text-zinc-900">2. Canal de Entrega e Destinatários</h3>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Canal padrão de entrega" htmlFor="ia-canal" erro={e.canalRelatorio}>
+            <Select id="ia-canal" name="canalRelatorio" defaultValue={valores.canalRelatorio}>
+              <option value="WHATSAPP">WhatsApp (Evolution API) + Guardar no Sistema</option>
+              <option value="EMAIL">E-mail HTML + Guardar no Sistema</option>
+              <option value="AMBOS">WhatsApp + E-mail + Guardar no Sistema</option>
+              <option value="APENAS_SISTEMA">Apenas guardar no Histórico do Sistema</option>
+            </Select>
+          </Field>
+          <Field
+            label="Remetente de E-mail (opcional)"
+            htmlFor="ia-rem"
+            erro={e.emailRemetente}
+            ajuda="Ex.: Relatórios Academia <relatorios@seudominio.ao>"
+          >
+            <Input
+              id="ia-rem"
+              name="emailRemetente"
+              defaultValue={valores.emailRemetente}
+              placeholder="Relatórios <onboarding@resend.dev>"
+            />
+          </Field>
+          <Field
+            label="Destinatários WhatsApp (um por linha)"
+            htmlFor="ia-wa"
+            erro={e.destinatariosWhatsappRelatorio}
+            ajuda="Se ficar vazio, usa os números da equipa comercial configurados em Automações."
+          >
+            <Textarea
+              id="ia-wa"
+              name="destinatariosWhatsappRelatorio"
+              rows={3}
+              defaultValue={valores.destinatariosWhatsappRelatorio}
+              placeholder="+244 923 000 000"
+            />
+          </Field>
+          <Field
+            label="Destinatários de E-mail (um por linha)"
+            htmlFor="ia-em"
+            erro={e.destinatariosEmailRelatorio}
+            ajuda="Endereços dos gestores que recebem o relatório formatado."
+          >
+            <Textarea
+              id="ia-em"
+              name="destinatariosEmailRelatorio"
+              rows={3}
+              defaultValue={valores.destinatariosEmailRelatorio}
+              placeholder="direcao@academia.ao"
+            />
+          </Field>
+        </div>
+      </section>
+
+      <section className="space-y-4 border-t border-dotted border-zinc-200 pt-6">
+        <h3 className="text-sm font-bold text-zinc-900">3. Credenciais API do Claude (Anthropic) e E-mail (Resend)</h3>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field
+            label="Chave API do Claude (Anthropic)"
+            htmlFor="ia-claude-key"
+            erro={e.anthropicApiKey}
+            ajuda={
+              valores.temChaveClaudePropria
+                ? `Chave cifrada ativa (${valores.chaveClaudeMascarada}). Deixe em branco para manter.`
+                : valores.temChaveClaudeGlobal
+                  ? "A usar ANTHROPIC_API_KEY global do servidor. Preencha apenas se quiser chave própria."
+                  : "Opcional: sem chave API, o sistema usa o motor analítico determinístico estruturado."
+            }
+          >
+            <Input
+              id="ia-claude-key"
+              name="anthropicApiKey"
+              type="password"
+              autoComplete="new-password"
+              placeholder="sk-ant-api03-..."
+            />
+            {valores.temChaveClaudePropria && (
+              <label className="mt-1.5 flex items-center gap-2 text-xs text-zinc-600">
+                <input type="checkbox" name="removerAnthropicApiKey" className="size-3.5 accent-[#1C1D21]" />
+                Remover chave própria guardada
+              </label>
+            )}
+          </Field>
+
+          <Field label="Modelo Claude" htmlFor="ia-modelo" erro={e.modeloClaude}>
+            <Select id="ia-modelo" name="modeloClaude" defaultValue={valores.modeloClaude}>
+              <option value="claude-sonnet-4-20250514">Claude Sonnet 4 (Recomendado)</option>
+              <option value="claude-3-7-sonnet-latest">Claude 3.7 Sonnet</option>
+              <option value="claude-3-5-haiku-latest">Claude 3.5 Haiku (Rápido / Económico)</option>
+            </Select>
+          </Field>
+
+          <Field
+            label="Chave API Resend (para envio por E-mail)"
+            htmlFor="ia-resend-key"
+            erro={e.resendApiKey}
+            ajuda={
+              valores.temChaveEmailPropria
+                ? `Chave cifrada ativa (${valores.chaveEmailMascarada}). Deixe em branco para manter.`
+                : "Opcional se RESEND_API_KEY já estiver definida na Vercel ou se usar apenas WhatsApp."
+            }
+          >
+            <Input
+              id="ia-resend-key"
+              name="resendApiKey"
+              type="password"
+              autoComplete="new-password"
+              placeholder="re_..."
+            />
+            {valores.temChaveEmailPropria && (
+              <label className="mt-1.5 flex items-center gap-2 text-xs text-zinc-600">
+                <input type="checkbox" name="removerResendApiKey" className="size-3.5 accent-[#1C1D21]" />
+                Remover chave de e-mail guardada
+              </label>
+            )}
+          </Field>
+        </div>
+      </section>
+
+      <Button type="submit" disabled={pendente}>
+        {pendente ? "A guardar…" : "Guardar configurações de Relatórios IA"}
+      </Button>
+    </form>
+  );
+}

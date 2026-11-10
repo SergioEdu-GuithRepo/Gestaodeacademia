@@ -17,6 +17,7 @@ import {
   Settings,
   ShieldUser,
   Smartphone,
+  Sparkles,
   UserPlus,
   UserRound,
   UsersRound,
@@ -32,6 +33,7 @@ import { PesquisaRapida } from "./pesquisa-rapida";
 
 const ICONES = {
   painel: LayoutGrid,
+  inteligencia: Sparkles,
   guia: Compass,
   agenda: CalendarDays,
   turmas: UsersRound,

@@ -13,7 +13,10 @@ export type DefinicaoModelo = {
   texto: string;
 };
 
-export const MODELOS_PADRAO: Record<Exclude<TipoMensagem, "MANUAL" | "TESTE" | "CAMPANHA">, DefinicaoModelo> = {
+export const MODELOS_PADRAO: Record<
+  Exclude<TipoMensagem, "MANUAL" | "TESTE" | "CAMPANHA" | "RELATORIO_IA" | "ALERTA_IA">,
+  DefinicaoModelo
+> = {
   LEMBRETE_VENCIMENTO: {
     nome: "Lembrete de vencimento",
     descricao: "Enviado antes do vencimento de uma parcela (antecedência configurável).",
@@ -63,6 +66,8 @@ export const TIPOS_MODELO = Object.keys(MODELOS_PADRAO) as TipoModelo[];
 export const NOMES_TIPO_MENSAGEM: Record<TipoMensagem, string> = {
   ...(Object.fromEntries(TIPOS_MODELO.map((t) => [t, MODELOS_PADRAO[t].nome])) as Record<TipoModelo, string>),
   CAMPANHA: "Campanha",
+  RELATORIO_IA: "Relatório IA",
+  ALERTA_IA: "Alerta IA",
   MANUAL: "Mensagem manual",
   TESTE: "Teste",
 };

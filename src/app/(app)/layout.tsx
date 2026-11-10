@@ -4,6 +4,14 @@ import { NOMES_PERFIL, pode, type Permissao } from "@/lib/rbac";
 
 const MENU: (ItemMenu & { permissao: Permissao })[] = [
   { href: "/painel", label: "Visão Geral", icone: "painel", grupo: "Início", permissao: "painel:ver" },
+  {
+    href: "/inteligencia",
+    label: "CRM & Relatórios IA",
+    icone: "inteligencia",
+    grupo: "Início",
+    destaque: "IA",
+    permissao: "inteligencia:ver",
+  },
 
   // Ensino e Agenda
   { href: "/formacoes", label: "Formações", icone: "formacoes", grupo: "1. Ensino e Agenda", permissao: "formacoes:ver" },

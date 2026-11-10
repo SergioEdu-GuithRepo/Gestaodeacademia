@@ -1,22 +1,29 @@
+import type { EstadoAvisoPagamento } from "@prisma/client";
 import {
   ArrowUpRight,
+  Award,
   BookOpen,
   CalendarDays,
   CheckCircle2,
   Clock,
   CreditCard,
+  FileText,
   Gift,
   GraduationCap,
+  Landmark,
+  Lock,
   MapPin,
   MessageCircle,
+  ShieldCheck,
   UserCheck,
   Wallet,
 } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { TbodyProgressivo } from "@/components/lista-progressiva";
+import { GrelhaProgressiva, TbodyProgressivo } from "@/components/lista-progressiva";
 import { Alerta, Badge, Card, CardHeader, Tabela, Td, Th, Vazio } from "@/components/ui";
+import { chaveAvaliacaoAnonima, verificarElegibilidadeCertificado } from "@/lib/certificados";
 import { dataSimples, diaLocal, formatData, formatDiaSemana, formatHora, hojeLocal } from "@/lib/datas";
 import { dbTenant, prisma } from "@/lib/db";
 import {
@@ -26,12 +33,36 @@ import {
   NOMES_METODO,
 } from "@/lib/formandos";
 import { comoCliente, obterConfiguracao } from "@/lib/mensagens/config";
-import { formatKz } from "@/lib/money";
+import { centimosParaInput, formatKz } from "@/lib/money";
 import { comPago, estadoParcela, resumirParcelas } from "@/lib/parcelas";
+import {
+  calcularAssiduidade,
+  CORES_ESTADO_PRESENCA,
+  NOMES_ESTADO_PRESENCA,
+  type SessaoComPresenca,
+} from "@/lib/presencas";
 import { calcularSaldoPontos } from "@/lib/retencao";
+import {
+  AvaliarFormadorPortalForm,
+  BotaoCopiarDado,
+  BotaoEmitirCertificadoPortal,
+  ComunicarPagamentoForm,
+} from "./forms";
 
 type Props = {
   params: Promise<{ token: string }>;
+};
+
+const NOMES_ESTADO_AVISO: Record<EstadoAvisoPagamento, string> = {
+  PENDENTE: "Pendente de validação",
+  CONFIRMADO: "Confirmado",
+  REJEITADO: "Rejeitado",
+};
+
+const CORES_ESTADO_AVISO: Record<EstadoAvisoPagamento, "amarelo" | "verde" | "vermelho"> = {
+  PENDENTE: "amarelo",
+  CONFIRMADO: "verde",
+  REJEITADO: "vermelho",
 };
 
 function iniciaisNome(nome: string) {
@@ -75,6 +106,7 @@ export default async function PortalFormandoPage({ params }: Props) {
       orderBy: { createdAt: "desc" },
       include: {
         campanha: { select: { id: true, nome: true, descontoPct: true } },
+        certificado: true,
         turma: {
           include: {
             formacao: { select: { id: true, nome: true, cargaHoraria: true, categoria: true } },
@@ -83,7 +115,8 @@ export default async function PortalFormandoPage({ params }: Props) {
               orderBy: { inicio: "asc" },
               include: {
                 sala: { select: { nome: true } },
-                formador: { select: { nome: true } },
+                formador: { select: { id: true, nome: true } },
+                presencas: { select: { matriculaId: true, estado: true } },
               },
             },
           },
@@ -91,6 +124,22 @@ export default async function PortalFormandoPage({ params }: Props) {
         parcelas: {
           orderBy: { numero: "asc" },
           include: { alocacoes: { select: { valor: true } } },
+        },
+        pagamentos: {
+          orderBy: [{ dataPagamento: "desc" }, { createdAt: "desc" }],
+          include: {
+            alocacoes: {
+              include: {
+                parcela: { select: { numero: true } },
+              },
+            },
+          },
+        },
+        avisosPagamento: {
+          orderBy: { createdAt: "desc" },
+          include: {
+            parcela: { select: { numero: true } },
+          },
         },
       },
     }),
@@ -133,12 +182,67 @@ export default async function PortalFormandoPage({ params }: Props) {
     obterConfiguracao(comoCliente(db), formando.tenantId),
   ]);
 
-  const hoje = dataSimples(hojeLocal());
+  const hojeIso = hojeLocal();
+  const hoje = dataSimples(hojeIso);
   const agora = new Date();
 
   const matriculasValidas = matriculas.filter((m) => m.estado !== "CANCELADA");
   const todasParcelasValidas = matriculasValidas.flatMap((m) => m.parcelas.map(comPago));
   const resumoGeral = resumirParcelas(todasParcelasValidas, hoje);
+
+  // Formadores distintos por matrícula e verificação única de avaliações anónimas já submetidas
+  const formadoresPorMatricula = new Map<string, { id: string; nome: string }[]>();
+  const chavesCandidatas: string[] = [];
+
+  for (const mat of matriculasValidas) {
+    const mapaInst = new Map<string, string>();
+    for (const s of mat.turma.sessoes) {
+      if (!mapaInst.has(s.formador.id)) {
+        mapaInst.set(s.formador.id, s.formador.nome);
+      }
+    }
+    const listaInst = Array.from(mapaInst.entries()).map(([id, nome]) => ({ id, nome }));
+    formadoresPorMatricula.set(mat.id, listaInst);
+    for (const inst of listaInst) {
+      chavesCandidatas.push(chaveAvaliacaoAnonima(mat.id, inst.id));
+    }
+  }
+
+  const avaliacoesExistentes =
+    chavesCandidatas.length > 0
+      ? await db.avaliacaoFormador.findMany({
+          where: { chaveAnonima: { in: chavesCandidatas } },
+          select: { chaveAnonima: true },
+        })
+      : [];
+  const chavesJaAvaliadas = new Set(
+    avaliacoesExistentes.map((a) => a.chaveAnonima).filter((c): c is string => Boolean(c)),
+  );
+
+  // Cálculo de assiduidade por matrícula e global
+  const assiduidadePorMatricula = new Map(
+    matriculasValidas.map((mat) => {
+      const sessoesAluno: SessaoComPresenca[] = mat.turma.sessoes.map((s) => ({
+        id: s.id,
+        inicio: s.inicio,
+        estado: s.estado,
+        temChamadaLancada: s.presencas.length > 0,
+        estadoAluno: s.presencas.find((p) => p.matriculaId === mat.id)?.estado ?? null,
+      }));
+      return [mat.id, calcularAssiduidade(sessoesAluno)];
+    }),
+  );
+
+  const todasSessoesFormando: SessaoComPresenca[] = matriculasValidas.flatMap((mat) =>
+    mat.turma.sessoes.map((s) => ({
+      id: `${mat.id}:${s.id}`,
+      inicio: s.inicio,
+      estado: s.estado,
+      temChamadaLancada: s.presencas.length > 0,
+      estadoAluno: s.presencas.find((p) => p.matriculaId === mat.id)?.estado ?? null,
+    })),
+  );
+  const assiduidadeGeral = calcularAssiduidade(todasSessoesFormando);
 
   const saldoPontos = calcularSaldoPontos(movimentosPontos, agora);
   const descontoPontosPct = Math.min(
@@ -147,13 +251,19 @@ export default async function PortalFormandoPage({ params }: Props) {
   );
   const elegivelFidelizacao = matriculasValidas.length >= 1 && cfg.descontoFidelizacaoPct > 0;
 
+  const temDadosBancarios = Boolean(
+    cfg.iban?.trim() || cfg.multicaixaExpress?.trim() || cfg.bancoNome?.trim(),
+  );
+
   const textoConviteWhatsapp = `Olá! Recomendo as formações de ${formando.tenant.nome}. Consulta o catálogo em /p/${formando.tenant.slug} e, no momento da matrícula, indica o meu nome (${formando.nome})!`;
   const urlConviteWhatsapp = `https://wa.me/?text=${encodeURIComponent(textoConviteWhatsapp)}`;
 
   const iniciais = iniciaisNome(formando.nome);
   const iniciaisCentro = iniciaisNome(formando.tenant.nome);
   const pctLiquidado =
-    resumoGeral.total > 0n ? Math.min(100, Math.round((Number(resumoGeral.pago) / Number(resumoGeral.total)) * 100)) : 100;
+    resumoGeral.total > 0n
+      ? Math.min(100, Math.round((Number(resumoGeral.pago) / Number(resumoGeral.total)) * 100))
+      : 100;
 
   return (
     <div className="min-h-dvh bg-[#F5F4EF] text-[#1C1D21]">
@@ -207,7 +317,9 @@ export default async function PortalFormandoPage({ params }: Props) {
             {/* Cartão lateral de Progresso Financeiro */}
             <div className="rounded-3xl border border-white/15 bg-[#FAF9F5] p-5 text-[#1C1D21] shadow-lg">
               <div className="mb-3 flex items-center justify-between border-b border-dotted border-zinc-300 pb-2">
-                <span className="text-xs font-bold tracking-wider text-zinc-600 uppercase">Resumo Financeiro</span>
+                <span className="text-xs font-bold tracking-wider text-zinc-600 uppercase">
+                  Resumo Financeiro
+                </span>
                 <span className="text-xs font-extrabold text-[#1C1D21]">{pctLiquidado}% liquidado</span>
               </div>
 
@@ -234,8 +346,8 @@ export default async function PortalFormandoPage({ params }: Props) {
           </div>
         </section>
 
-        {/* 4 Cartões de KPI */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {/* Cartões de KPI */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <Card className="p-5">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-zinc-500">Formações Inscritas</span>
@@ -256,11 +368,11 @@ export default async function PortalFormandoPage({ params }: Props) {
                 <CheckCircle2 className="size-4" aria-hidden />
               </span>
             </div>
-            <div className="mt-3 text-xl font-bold tracking-tight text-[#1E6332] sm:text-2xl">
+            <div className="mt-3 text-lg font-bold tracking-tight text-[#1E6332] sm:text-xl">
               {formatKz(resumoGeral.pago)}
             </div>
             <div className="mt-1 text-xs text-zinc-500">
-              Total contratado: {formatKz(resumoGeral.total)}
+              Contratado: {formatKz(resumoGeral.total)}
             </div>
           </Card>
 
@@ -272,7 +384,7 @@ export default async function PortalFormandoPage({ params }: Props) {
               </span>
             </div>
             <div
-              className={`mt-3 text-xl font-bold tracking-tight sm:text-2xl ${
+              className={`mt-3 text-lg font-bold tracking-tight sm:text-xl ${
                 resumoGeral.parcelasEmAtraso > 0 ? "text-[#B42318]" : "text-[#1C1D21]"
               }`}
             >
@@ -293,6 +405,35 @@ export default async function PortalFormandoPage({ params }: Props) {
 
           <Card className="p-5">
             <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-zinc-500">Assiduidade Média</span>
+              <span
+                className={`flex size-9 items-center justify-center rounded-full ${
+                  assiduidadeGeral.assiduidadePct >= cfg.minAssiduidadeCertificadoPct
+                    ? "bg-[#E7F4E8] text-[#1E6332]"
+                    : "bg-[#FEF3C7] text-[#92400E]"
+                }`}
+              >
+                <UserCheck className="size-4" aria-hidden />
+              </span>
+            </div>
+            <div
+              className={`mt-3 text-2xl font-bold tracking-tight sm:text-3xl ${
+                matriculasValidas.length > 0 &&
+                assiduidadeGeral.assiduidadePct < cfg.minAssiduidadeCertificadoPct
+                  ? "text-[#B42318]"
+                  : "text-[#1C1D21]"
+              }`}
+            >
+              {matriculasValidas.length > 0 ? `${assiduidadeGeral.assiduidadePct}%` : "—"}
+            </div>
+            <div className="mt-1 text-xs text-zinc-500">
+              Meta certificado:{" "}
+              <strong className="text-[#1C1D21]">{cfg.minAssiduidadeCertificadoPct}%</strong>
+            </div>
+          </Card>
+
+          <Card className="p-5">
+            <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-zinc-500">Pontos de Indicação</span>
               <span className="flex size-9 items-center justify-center rounded-full bg-[#F5F4EF] text-[#1C1D21]">
                 <Gift className="size-4" aria-hidden />
@@ -307,7 +448,221 @@ export default async function PortalFormandoPage({ params }: Props) {
           </Card>
         </div>
 
-        {/* Secção 1: As Minhas Formações, Próximas Aulas e Plano de Parcelas */}
+        {/* Cartão Editorial de Dados Bancários para Pagamento (quando existe dívida em aberto) */}
+        {resumoGeral.divida > 0n && temDadosBancarios && (
+          <Card className="overflow-hidden border-[#FBD34D]/60">
+            <CardHeader
+              titulo="Dados Bancários para Pagamento (IBAN / Multicaixa Express)"
+              descricao="Utilize as coordenadas oficiais abaixo para liquidar as suas parcelas e comunique o comprovativo diretamente na matrícula correspondente."
+              acoes={
+                <Badge cor="amarelo">Saldo em aberto: {formatKz(resumoGeral.divida)}</Badge>
+              }
+            />
+            <div className="grid gap-3 p-6 sm:grid-cols-2">
+              {(cfg.bancoNome || cfg.titularConta) && (
+                <div className="flex flex-col justify-between gap-2 rounded-2xl border border-zinc-200/80 bg-[#FAF9F5] p-4">
+                  <div>
+                    <div className="inline-flex items-center gap-1.5 text-[11px] font-bold tracking-wider text-zinc-500 uppercase">
+                      <Landmark className="size-3.5 text-[#1C1D21]" aria-hidden />
+                      Instituição Bancária & Titular
+                    </div>
+                    {cfg.bancoNome && (
+                      <div className="mt-1.5 text-sm font-bold text-[#1C1D21]">{cfg.bancoNome}</div>
+                    )}
+                    {cfg.titularConta && (
+                      <div className="mt-0.5 text-xs text-zinc-600">
+                        Titular: <strong className="text-[#1C1D21]">{cfg.titularConta}</strong>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {cfg.iban && (
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-zinc-200/80 bg-[#FAF9F5] p-4">
+                  <div className="min-w-0">
+                    <div className="text-[11px] font-bold tracking-wider text-zinc-500 uppercase">
+                      IBAN Oficial (Transferência Bancária)
+                    </div>
+                    <div className="mt-1 font-mono text-sm font-bold tracking-wide break-all text-[#1C1D21]">
+                      {cfg.iban}
+                    </div>
+                  </div>
+                  <BotaoCopiarDado valor={cfg.iban} rotulo="Copiar IBAN" />
+                </div>
+              )}
+
+              {cfg.multicaixaExpress && (
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-zinc-200/80 bg-[#FAF9F5] p-4">
+                  <div className="min-w-0">
+                    <div className="text-[11px] font-bold tracking-wider text-zinc-500 uppercase">
+                      Multicaixa Express
+                    </div>
+                    <div className="mt-1 font-mono text-sm font-bold tracking-wide text-[#1C1D21]">
+                      {cfg.multicaixaExpress}
+                    </div>
+                  </div>
+                  <BotaoCopiarDado valor={cfg.multicaixaExpress} rotulo="Copiar N.º" />
+                </div>
+              )}
+            </div>
+          </Card>
+        )}
+
+        {/* Secção Dedicada: Certificados de Conclusão */}
+        {matriculasValidas.length > 0 && (
+          <Card>
+            <CardHeader
+              titulo="Certificados de Conclusão"
+              descricao={`Os certificados digitais verificáveis por QR Code são disponibilizados após conclusão da turma, liquidação integral do plano financeiro e assiduidade mínima de ${cfg.minAssiduidadeCertificadoPct}%.`}
+              acoes={
+                <Badge cor="azul">
+                  <Award className="mr-1 inline size-3.5" aria-hidden /> Validação QR Pública
+                </Badge>
+              }
+            />
+            <div className="grid gap-4 p-6 md:grid-cols-2">
+              {matriculasValidas.map((mat) => {
+                const parcelas = mat.parcelas.map(comPago);
+                const resumo = resumirParcelas(parcelas, hoje);
+                const assid = assiduidadePorMatricula.get(mat.id) ?? {
+                  sessoesRealizadas: 0,
+                  sessoesComChamada: 0,
+                  presencas: 0,
+                  justificadas: 0,
+                  faltas: 0,
+                  assiduidadePct: 100,
+                  faltasSeguidas: 0,
+                  alertaFaltasSeguidas: false,
+                };
+
+                const certificadoAtivo =
+                  mat.certificado && !mat.certificado.revogadoEm && resumo.divida === 0n
+                    ? mat.certificado
+                    : null;
+
+                if (certificadoAtivo) {
+                  return (
+                    <div
+                      key={mat.id}
+                      className="flex flex-col justify-between gap-4 rounded-3xl border border-[#FBD34D]/40 bg-[#1C1D21] p-6 text-white shadow-lg"
+                    >
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-[#FBD34D] px-3 py-1 text-[11px] font-extrabold tracking-wider text-[#1C1D21] uppercase">
+                            <Award className="size-3.5" aria-hidden /> Diploma Emitido
+                          </span>
+                          <span className="font-mono text-xs font-semibold text-[#FBD34D]">
+                            {certificadoAtivo.codigo}
+                          </span>
+                        </div>
+
+                        <div>
+                          <h3 className="text-lg font-bold tracking-tight text-white">
+                            {mat.turma.formacao.nome}
+                          </h3>
+                          <p className="mt-0.5 text-xs text-zinc-300">
+                            Turma {mat.turma.codigo} · Carga horária: {certificadoAtivo.cargaHoraria} h ·
+                            Assiduidade: {certificadoAtivo.assiduidadePct}%
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/15 pt-4">
+                        <span className="text-[11px] text-zinc-400">
+                          Emitido em {formatData(dataSimples(diaLocal(certificadoAtivo.emitidoEm)))}
+                        </span>
+                        <Link
+                          href={`/portal/formando/${token}/certificado/${mat.id}`}
+                          className="inline-flex min-h-10 items-center gap-1.5 rounded-full bg-[#FBD34D] px-4 py-2 text-xs font-bold text-[#1C1D21] shadow-sm transition-all hover:-translate-y-0.5 hover:bg-amber-300"
+                        >
+                          Abrir / Descarregar Certificado A4 <ArrowUpRight className="size-4" aria-hidden />
+                        </Link>
+                      </div>
+                    </div>
+                  );
+                }
+
+                const elegibilidade = verificarElegibilidadeCertificado({
+                  estadoMatricula: mat.estado,
+                  dividaCentimos: resumo.divida,
+                  assiduidadePct: assid.assiduidadePct,
+                  minAssiduidadePct: cfg.minAssiduidadeCertificadoPct,
+                  revogado: Boolean(mat.certificado?.revogadoEm),
+                });
+
+                if (elegibilidade.elegivel) {
+                  return (
+                    <div
+                      key={mat.id}
+                      className="flex flex-col justify-between gap-4 rounded-3xl border border-[#288042]/30 bg-[#FAF9F5] p-6"
+                    >
+                      <div className="space-y-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <Badge cor="verde">Elegível para Emissão Imediata</Badge>
+                          <span className="text-xs font-semibold text-zinc-500">
+                            Assiduidade: {assid.assiduidadePct}%
+                          </span>
+                        </div>
+                        <h3 className="text-base font-bold text-[#1C1D21]">
+                          {mat.turma.formacao.nome} · Turma {mat.turma.codigo}
+                        </h3>
+                        <p className="text-xs text-zinc-600">
+                          Parabéns! Concluiu a formação com assiduidade aprovada e plano financeiro 100%
+                          liquidado. Pode emitir já o seu certificado digital A4 com código QR.
+                        </p>
+                      </div>
+
+                      <div className="border-t border-dotted border-zinc-200 pt-3">
+                        <BotaoEmitirCertificadoPortal portalToken={token} matriculaId={mat.id} />
+                      </div>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div
+                    key={mat.id}
+                    className="flex flex-col justify-between gap-3 rounded-3xl border border-zinc-200/90 bg-[#FAF9F5] p-6"
+                  >
+                    <div className="space-y-2.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-zinc-200/80 px-3 py-1 text-xs font-semibold text-zinc-700">
+                          <Lock className="size-3.5" aria-hidden /> Certificado bloqueado
+                        </span>
+                        <span className="text-xs text-zinc-500">Turma {mat.turma.codigo}</span>
+                      </div>
+
+                      <h3 className="text-base font-bold text-[#1C1D21]">{mat.turma.formacao.nome}</h3>
+
+                      <ul className="space-y-1.5 pt-1 text-xs text-zinc-700">
+                        {elegibilidade.motivosBloqueio.map((motivo, idx) => (
+                          <li key={idx} className="flex items-start gap-2">
+                            <span
+                              className="mt-1.5 size-1.5 shrink-0 rounded-full bg-[#D97706]"
+                              aria-hidden
+                            />
+                            <span>
+                              {motivo}
+                              {motivo.includes("valores financeiros") && resumo.divida > 0n
+                                ? ` (Saldo pendente: ${formatKz(resumo.divida)})`
+                                : ""}
+                              {motivo.includes("revogado") && mat.certificado?.motivoRevogacao
+                                ? ` Motivo: ${mat.certificado.motivoRevogacao}`
+                                : ""}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        )}
+
+        {/* Secção 1: As Minhas Formações, Assiduidade, Avaliações e Plano de Parcelas */}
         <section className="space-y-5">
           {matriculasValidas.length === 0 ? (
             <Card>
@@ -322,11 +677,32 @@ export default async function PortalFormandoPage({ params }: Props) {
             matriculasValidas.map((mat) => {
               const parcelas = mat.parcelas.map(comPago);
               const resumo = resumirParcelas(parcelas, hoje);
-              const proximasSessoes = mat.turma.sessoes.filter(
-                (s) => s.estado === "AGENDADA" || s.inicio.getTime() >= agora.getTime(),
+              const assid = assiduidadePorMatricula.get(mat.id) ?? {
+                sessoesRealizadas: 0,
+                sessoesComChamada: 0,
+                presencas: 0,
+                justificadas: 0,
+                faltas: 0,
+                assiduidadePct: 100,
+                faltasSeguidas: 0,
+                alertaFaltasSeguidas: false,
+              };
+
+              const parcelasAbertas = parcelas
+                .filter((p) => p.valor > p.pago)
+                .map((p) => ({
+                  id: p.id,
+                  numero: p.numero,
+                  faltaCentimos: p.valor - p.pago,
+                  faltaFormatada: formatKz(p.valor - p.pago),
+                  vencimentoFormatado: formatData(p.vencimento),
+                }));
+
+              const valorSugerido = centimosParaInput(
+                parcelasAbertas[0]?.faltaCentimos ?? resumo.divida,
               );
-              const sessoesMostrar =
-                proximasSessoes.length > 0 ? proximasSessoes.slice(0, 6) : mat.turma.sessoes.slice(-4);
+
+              const formadoresTurma = formadoresPorMatricula.get(mat.id) ?? [];
 
               return (
                 <Card key={mat.id} className="overflow-hidden">
@@ -381,44 +757,161 @@ export default async function PortalFormandoPage({ params }: Props) {
                       </div>
                     </div>
 
-                    {/* Próximas sessões / calendário da turma */}
+                    {/* Barra de Assiduidade Nominal e Progresso Pedagógico */}
+                    <div className="rounded-2xl border border-zinc-200/80 bg-[#FAF9F5] p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-bold tracking-wider text-zinc-600 uppercase">
+                            Assiduidade Nominal na Turma
+                          </span>
+                          <Badge
+                            cor={
+                              assid.assiduidadePct >= cfg.minAssiduidadeCertificadoPct
+                                ? "verde"
+                                : "vermelho"
+                            }
+                          >
+                            {assid.assiduidadePct}% de presenças
+                          </Badge>
+                        </div>
+                        <span className="text-zinc-500">
+                          Meta mínima certificado:{" "}
+                          <strong className="text-[#1C1D21]">{cfg.minAssiduidadeCertificadoPct}%</strong>
+                        </span>
+                      </div>
+
+                      <div className="mt-3 h-3 w-full overflow-hidden rounded-full bg-[#ECEAE2] p-0.5">
+                        <div
+                          style={{ width: `${Math.max(4, assid.assiduidadePct)}%` }}
+                          className={`h-full rounded-full transition-all duration-500 ${
+                            assid.assiduidadePct >= cfg.minAssiduidadeCertificadoPct
+                              ? "bg-[#288042]"
+                              : "bg-[#D92D20]"
+                          }`}
+                        />
+                      </div>
+
+                      <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-600">
+                        <span>
+                          {assid.sessoesComChamada > 0 ? (
+                            <>
+                              <strong className="text-[#1E6332]">{assid.presencas}</strong> presença(s) ·{" "}
+                              <strong className="text-[#92400E]">{assid.justificadas}</strong> justificada(s) ·{" "}
+                              <strong className="text-[#B42318]">{assid.faltas}</strong> falta(s) em{" "}
+                              {assid.sessoesComChamada} aula(s) com chamada
+                            </>
+                          ) : (
+                            <>
+                              {assid.sessoesRealizadas} aula(s) realizada(s) · Sem faltas registadas
+                            </>
+                          )}
+                        </span>
+                        {assid.alertaFaltasSeguidas && (
+                          <span className="font-semibold text-[#B42318]">
+                            Atenção: {assid.faltasSeguidas} faltas consecutivas registadas
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Calendário de sessões da turma com estado individual de presença */}
                     <div>
                       <h4 className="mb-3 text-xs font-bold tracking-wider text-zinc-500 uppercase">
-                        Calendário de sessões da turma ({mat.turma.sessoes.length} sessão(ões))
+                        Calendário de sessões e presenças ({mat.turma.sessoes.length} sessão(ões))
                       </h4>
-                      {sessoesMostrar.length === 0 ? (
+                      {mat.turma.sessoes.length === 0 ? (
                         <p className="text-xs text-zinc-500">Horário de sessões a anunciar brevemente.</p>
                       ) : (
-                        <div className="grid gap-3 sm:grid-cols-2">
-                          {sessoesMostrar.map((s) => (
-                            <div
-                              key={s.id}
-                              className="flex items-start justify-between gap-2.5 rounded-2xl border border-zinc-200/80 bg-[#FAF9F5] p-3.5 text-xs"
-                            >
-                              <div>
-                                <div className="font-bold text-[#1C1D21]">
-                                  {formatDiaSemana(s.inicio)} ({formatData(dataSimples(diaLocal(s.inicio)))})
+                        <GrelhaProgressiva
+                          className="grid gap-3 sm:grid-cols-2"
+                          passo={6}
+                          labelItem="sessões"
+                        >
+                          {mat.turma.sessoes.map((s) => {
+                            const temChamada = s.presencas.length > 0;
+                            const estadoAluno =
+                              s.presencas.find((p) => p.matriculaId === mat.id)?.estado ?? "PRESENTE";
+
+                            return (
+                              <div
+                                key={s.id}
+                                className="flex items-start justify-between gap-2.5 rounded-2xl border border-zinc-200/80 bg-[#FAF9F5] p-3.5 text-xs"
+                              >
+                                <div>
+                                  <div className="font-bold text-[#1C1D21]">
+                                    {formatDiaSemana(s.inicio)} ({formatData(dataSimples(diaLocal(s.inicio)))})
+                                  </div>
+                                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-zinc-600">
+                                    <span className="inline-flex items-center gap-1">
+                                      <Clock className="size-3.5 text-zinc-400" aria-hidden />
+                                      {formatHora(s.inicio)}–{formatHora(s.fim)}
+                                    </span>
+                                    <span className="inline-flex items-center gap-1">
+                                      <MapPin className="size-3.5 text-zinc-400" aria-hidden />
+                                      {s.sala.nome}
+                                    </span>
+                                    <span>Formador: {s.formador.nome}</span>
+                                  </div>
                                 </div>
-                                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-zinc-600">
-                                  <span className="inline-flex items-center gap-1">
-                                    <Clock className="size-3.5 text-zinc-400" aria-hidden />
-                                    {formatHora(s.inicio)}–{formatHora(s.fim)}
-                                  </span>
-                                  <span className="inline-flex items-center gap-1">
-                                    <MapPin className="size-3.5 text-zinc-400" aria-hidden />
-                                    {s.sala.nome}
-                                  </span>
-                                  <span>Formador: {s.formador.nome}</span>
+                                <div className="flex shrink-0 flex-col items-end gap-1.5">
+                                  <Badge cor={s.estado === "REALIZADA" ? "verde" : "azul"}>
+                                    {s.estado === "REALIZADA" ? "Realizada" : "Agendada"}
+                                  </Badge>
+                                  {temChamada && (
+                                    <Badge cor={CORES_ESTADO_PRESENCA[estadoAluno]}>
+                                      {NOMES_ESTADO_PRESENCA[estadoAluno]}
+                                    </Badge>
+                                  )}
                                 </div>
                               </div>
-                              <Badge cor={s.estado === "REALIZADA" ? "verde" : "azul"}>
-                                {s.estado === "REALIZADA" ? "Realizada" : "Agendada"}
-                              </Badge>
-                            </div>
-                          ))}
-                        </div>
+                            );
+                          })}
+                        </GrelhaProgressiva>
                       )}
                     </div>
+
+                    {/* Avaliação Anónima de Formadores */}
+                    {formadoresTurma.length > 0 && (
+                      <div className="space-y-2.5">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <h4 className="text-xs font-bold tracking-wider text-zinc-500 uppercase">
+                            Avaliação Pedagógica dos Formadores (100% Anónima)
+                          </h4>
+                          <span className="inline-flex items-center gap-1 text-[11px] text-zinc-500">
+                            <ShieldCheck className="size-3.5 text-[#1E6332]" aria-hidden /> Respostas protegidas
+                            por chave criptográfica anónima
+                          </span>
+                        </div>
+
+                        <div className="space-y-2">
+                          {formadoresTurma.map((inst) => {
+                            const jaAvaliou = chavesJaAvaliadas.has(
+                              chaveAvaliacaoAnonima(mat.id, inst.id),
+                            );
+                            if (jaAvaliou) {
+                              return (
+                                <div
+                                  key={inst.id}
+                                  className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[#288042]/25 bg-[#E7F4E8]/45 px-4 py-3 text-xs"
+                                >
+                                  <span className="font-semibold text-[#1C1D21]">{inst.nome}</span>
+                                  <Badge cor="verde">✔ Avaliação anónima submetida</Badge>
+                                </div>
+                              );
+                            }
+                            return (
+                              <AvaliarFormadorPortalForm
+                                key={inst.id}
+                                portalToken={token}
+                                matriculaId={mat.id}
+                                formadorId={inst.id}
+                                formadorNome={inst.nome}
+                              />
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Tabela de parcelas */}
                     <div>
@@ -441,7 +934,10 @@ export default async function PortalFormandoPage({ params }: Props) {
                             const e = estadoParcela(p, hoje);
                             const falta = p.valor > p.pago ? p.valor - p.pago : 0n;
                             return (
-                              <tr key={p.id} className="bg-[#FAF9F5]/70 transition-colors hover:bg-[#FEF3C7]/40">
+                              <tr
+                                key={p.id}
+                                className="bg-[#FAF9F5]/70 transition-colors hover:bg-[#FEF3C7]/40"
+                              >
                                 <Td className="font-semibold text-[#1C1D21]">{p.numero}.ª parcela</Td>
                                 <Td className="whitespace-nowrap">
                                   <span className="inline-flex items-center gap-1.5">
@@ -467,6 +963,112 @@ export default async function PortalFormandoPage({ params }: Props) {
                         </TbodyProgressivo>
                       </Tabela>
                     </div>
+
+                    {/* Comunicar Pagamento + Histórico de Avisos Submetidos */}
+                    {(resumo.divida > 0n || mat.avisosPagamento.length > 0) && (
+                      <div className="space-y-3 border-t border-dotted border-zinc-200 pt-4">
+                        {resumo.divida > 0n && (
+                          <ComunicarPagamentoForm
+                            portalToken={token}
+                            matriculaId={mat.id}
+                            valorSugerido={valorSugerido}
+                            hojeIso={hojeIso}
+                            parcelasAbertas={parcelasAbertas}
+                          />
+                        )}
+
+                        {mat.avisosPagamento.length > 0 && (
+                          <div className="space-y-2">
+                            <h5 className="text-xs font-bold tracking-wider text-zinc-500 uppercase">
+                              Comunicações de Pagamento Enviadas ({mat.avisosPagamento.length})
+                            </h5>
+                            <div className="space-y-2">
+                              {mat.avisosPagamento.map((av) => (
+                                <div
+                                  key={av.id}
+                                  className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-zinc-200/80 bg-[#FAF9F5] px-4 py-2.5 text-xs"
+                                >
+                                  <div className="space-y-0.5">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className="font-bold text-[#1C1D21]">{formatKz(av.valor)}</span>
+                                      <span className="text-zinc-500">·</span>
+                                      <span className="font-medium text-zinc-700">
+                                        {NOMES_METODO[av.metodo]}
+                                      </span>
+                                      {av.parcela && (
+                                        <span className="text-zinc-500">
+                                          ({av.parcela.numero}.ª parcela)
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="text-[11px] text-zinc-500">
+                                      Ref.: {av.referencia} · Data: {formatData(av.dataTransferencia)}
+                                      {av.notas ? ` · ${av.notas}` : ""}
+                                    </div>
+                                  </div>
+                                  <Badge cor={CORES_ESTADO_AVISO[av.estado]}>
+                                    {NOMES_ESTADO_AVISO[av.estado]}
+                                  </Badge>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Pagamentos Confirmados desta Matrícula com Comprovativo A4 */}
+                    {mat.pagamentos.length > 0 && (
+                      <div className="space-y-2.5 border-t border-dotted border-zinc-200 pt-4">
+                        <h4 className="text-xs font-bold tracking-wider text-zinc-500 uppercase">
+                          Pagamentos Confirmados e Comprovativos A4 ({mat.pagamentos.length})
+                        </h4>
+                        <div className="space-y-2">
+                          {mat.pagamentos.map((pg) => {
+                            const parcelasLiquidadas = pg.alocacoes
+                              .map((a) => `${a.parcela.numero}.ª`)
+                              .join(", ");
+                            return (
+                              <div
+                                key={pg.id}
+                                className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-zinc-200/80 bg-[#FAF9F5] px-4 py-3 text-xs"
+                              >
+                                <div className="space-y-0.5">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-sm font-bold text-[#1E6332]">
+                                      {formatKz(pg.valor)}
+                                    </span>
+                                    <span className="font-medium text-[#1C1D21]">
+                                      {NOMES_METODO[pg.metodo]}
+                                    </span>
+                                    <span className="text-zinc-500">
+                                      · {formatData(pg.dataPagamento)}
+                                    </span>
+                                  </div>
+                                  <div className="text-[11px] text-zinc-500">
+                                    {[
+                                      parcelasLiquidadas ? `Parcela(s): ${parcelasLiquidadas}` : null,
+                                      pg.referencia ? `Ref.: ${pg.referencia}` : null,
+                                      pg.referenciaRecibo ? `Recibo AGT: ${pg.referenciaRecibo}` : null,
+                                    ]
+                                      .filter(Boolean)
+                                      .join(" · ")}
+                                  </div>
+                                </div>
+
+                                <Link
+                                  href={`/portal/formando/${token}/recibo/${pg.id}`}
+                                  className="inline-flex min-h-8.5 items-center gap-1.5 rounded-full border border-zinc-200/90 bg-white px-3.5 py-1.5 text-xs font-semibold text-[#1C1D21] shadow-2xs transition-all hover:-translate-y-0.5 hover:border-[#FBD34D] hover:bg-[#FBD34D]"
+                                >
+                                  <FileText className="size-3.5" aria-hidden />
+                                  Comprovativo A4 ↗
+                                </Link>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </Card>
               );
@@ -495,30 +1097,43 @@ export default async function PortalFormandoPage({ params }: Props) {
             {elegivelFidelizacao && (
               <Alerta tipo="sucesso">
                 <strong>Benefício de Ex-Formando Ativo:</strong> Tem direito a{" "}
-                <strong>{cfg.descontoFidelizacaoPct}% de Desconto de Fidelização</strong> na sua próxima formação!
+                <strong>{cfg.descontoFidelizacaoPct}% de Desconto de Fidelização</strong> na sua próxima
+                formação!
               </Alerta>
             )}
 
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <div className="rounded-2xl border border-zinc-200/80 bg-[#FAF9F5] p-4">
                 <div className="text-xs font-medium text-zinc-500">Pontos disponíveis</div>
-                <div className="mt-1.5 text-xl font-bold text-[#1C1D21]">{saldoPontos.saldoDisponivel} pts</div>
-                <div className="mt-0.5 text-xs font-semibold text-[#1E6332]">= {descontoPontosPct}% de desconto</div>
+                <div className="mt-1.5 text-xl font-bold text-[#1C1D21]">
+                  {saldoPontos.saldoDisponivel} pts
+                </div>
+                <div className="mt-0.5 text-xs font-semibold text-[#1E6332]">
+                  = {descontoPontosPct}% de desconto
+                </div>
               </div>
               <div className="rounded-2xl border border-zinc-200/80 bg-[#FAF9F5] p-4">
                 <div className="text-xs font-medium text-zinc-500">Total ganhos</div>
-                <div className="mt-1.5 text-xl font-bold text-[#1E6332]">+{saldoPontos.totalGanhos} pts</div>
+                <div className="mt-1.5 text-xl font-bold text-[#1E6332]">
+                  +{saldoPontos.totalGanhos} pts
+                </div>
                 <div className="mt-0.5 text-xs text-zinc-500">{indicados.length} amigo(s) indicado(s)</div>
               </div>
               <div className="rounded-2xl border border-zinc-200/80 bg-[#FAF9F5] p-4">
                 <div className="text-xs font-medium text-zinc-500">Pontos usados</div>
-                <div className="mt-1.5 text-xl font-bold text-[#1C1D21]">{saldoPontos.totalResgatados} pts</div>
+                <div className="mt-1.5 text-xl font-bold text-[#1C1D21]">
+                  {saldoPontos.totalResgatados} pts
+                </div>
                 <div className="mt-0.5 text-xs text-zinc-500">Convertidos em desconto</div>
               </div>
               <div className="rounded-2xl border border-zinc-200/80 bg-[#FAF9F5] p-4">
                 <div className="text-xs font-medium text-zinc-500">Validade dos pontos</div>
-                <div className="mt-1.5 text-xl font-bold text-[#1C1D21]">{cfg.validadePontosMeses} meses</div>
-                <div className="mt-0.5 text-xs text-zinc-500">{saldoPontos.totalExpirados} pts expirados</div>
+                <div className="mt-1.5 text-xl font-bold text-[#1C1D21]">
+                  {cfg.validadePontosMeses} meses
+                </div>
+                <div className="mt-0.5 text-xs text-zinc-500">
+                  {saldoPontos.totalExpirados} pts expirados
+                </div>
               </div>
             </div>
           </div>
@@ -542,7 +1157,10 @@ export default async function PortalFormandoPage({ params }: Props) {
                   </thead>
                   <TbodyProgressivo colSpan={3}>
                     {indicados.map((ind) => (
-                      <tr key={ind.id} className="bg-[#FAF9F5]/70 transition-colors hover:bg-[#FEF3C7]/40">
+                      <tr
+                        key={ind.id}
+                        className="bg-[#FAF9F5]/70 transition-colors hover:bg-[#FEF3C7]/40"
+                      >
                         <Td className="font-semibold text-[#1C1D21]">
                           <span className="inline-flex items-center gap-1.5">
                             <UserCheck className="size-3.5 text-[#1C1D21]" aria-hidden />
@@ -584,7 +1202,10 @@ export default async function PortalFormandoPage({ params }: Props) {
                   </thead>
                   <TbodyProgressivo colSpan={3}>
                     {movimentosPontos.map((mov) => (
-                      <tr key={mov.id} className="bg-[#FAF9F5]/70 transition-colors hover:bg-[#FEF3C7]/40">
+                      <tr
+                        key={mov.id}
+                        className="bg-[#FAF9F5]/70 transition-colors hover:bg-[#FEF3C7]/40"
+                      >
                         <Td className="whitespace-nowrap">
                           {formatData(dataSimples(diaLocal(mov.createdAt)))}
                         </Td>
@@ -627,9 +1248,10 @@ export default async function PortalFormandoPage({ params }: Props) {
                   <Th>Método</Th>
                   <Th>Referência / Recibo AGT</Th>
                   <Th className="text-right">Valor</Th>
+                  <Th className="text-right">Comprovativo</Th>
                 </tr>
               </thead>
-              <TbodyProgressivo colSpan={5}>
+              <TbodyProgressivo colSpan={6}>
                 {pagamentos.map((p) => (
                   <tr key={p.id} className="bg-[#FAF9F5]/70 transition-colors hover:bg-[#FEF3C7]/40">
                     <Td className="whitespace-nowrap">{formatData(p.dataPagamento)}</Td>
@@ -655,6 +1277,14 @@ export default async function PortalFormandoPage({ params }: Props) {
                     </Td>
                     <Td className="text-right font-bold whitespace-nowrap text-[#1E6332]">
                       {formatKz(p.valor)}
+                    </Td>
+                    <Td className="text-right whitespace-nowrap">
+                      <Link
+                        href={`/portal/formando/${token}/recibo/${p.id}`}
+                        className="inline-flex items-center gap-1 rounded-full border border-zinc-200/90 bg-white px-3 py-1 text-xs font-semibold text-[#1C1D21] shadow-2xs transition-all hover:border-[#FBD34D] hover:bg-[#FBD34D]"
+                      >
+                        Comprovativo A4 ↗
+                      </Link>
                     </Td>
                   </tr>
                 ))}

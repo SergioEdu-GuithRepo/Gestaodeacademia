@@ -510,3 +510,146 @@ export async function redefinirPassword(userId: string, _prev: EstadoForm, fd: F
   revalidarUtilizadores();
   return { ok: `Palavra-passe de ${alvo.nome} redefinida.` };
 }
+
+// ── Dados Bancários (IBAN / Express) e Certificados ──────────────────────────
+
+const esquemaBancariosCertificados = z.object({
+  bancoNome: z.string().max(100, "Máximo de 100 caracteres.").nullable(),
+  iban: z.string().max(60, "Máximo de 60 caracteres.").nullable(),
+  titularConta: z.string().max(140, "Máximo de 140 caracteres.").nullable(),
+  multicaixaExpress: z.string().max(40, "Máximo de 40 caracteres.").nullable(),
+  minAssiduidadeCertificadoPct: z
+    .number({ invalid_type_error: "Indique uma percentagem inteira." })
+    .int()
+    .min(0, "Mínimo de 0%.")
+    .max(100, "Máximo de 100%."),
+});
+
+export async function guardarBancariosCertificadosAction(_prev: EstadoForm, fd: FormData): Promise<EstadoForm> {
+  const { user, db } = await configuracao();
+
+  const r = esquemaBancariosCertificados.safeParse({
+    bancoNome: campo(fd, "bancoNome"),
+    iban: campo(fd, "iban"),
+    titularConta: campo(fd, "titularConta"),
+    multicaixaExpress: campo(fd, "multicaixaExpress"),
+    minAssiduidadeCertificadoPct: inteiro(fd, "minAssiduidadeCertificadoPct"),
+  });
+
+  if (!r.success) {
+    return { erro: "Verifique os campos assinalados.", erros: errosZod(r.error) };
+  }
+
+  await db.configuracaoCentro.update({
+    where: { tenantId: user.tenantId },
+    data: r.data,
+  });
+
+  revalidatePath(CAMINHO);
+  revalidatePath("/turmas");
+  revalidatePath("/financeiro");
+  return { ok: "Dados bancários e regra de emissão de certificados guardados." };
+}
+
+// ── Relatórios Automáticos IA (Claude) e Alertas ─────────────────────────────
+
+function parseEmailsLista(texto: string | null | undefined): { emails: string[]; invalidos: string[] } {
+  const linhas = (texto ?? "")
+    .split(/[\n,;]+/)
+    .map((l) => l.trim().toLowerCase())
+    .filter(Boolean);
+  const emails: string[] = [];
+  const invalidos: string[] = [];
+  const validador = z.string().email();
+  for (const l of linhas) {
+    if (validador.safeParse(l).success) {
+      if (!emails.includes(l)) emails.push(l);
+    } else {
+      invalidos.push(l);
+    }
+  }
+  return { emails, invalidos };
+}
+
+const esquemaRelatoriosIa = z.object({
+  iaAtiva: z.boolean(),
+  modeloClaude: z.string().min(3, "Indique o modelo.").max(100),
+  relatorioSemanalAtivo: z.boolean(),
+  diaSemanaRelatorio: z.number().int().min(0).max(6),
+  relatorioMensalAtivo: z.boolean(),
+  diaMesRelatorio: z.number().int().min(1).max(28),
+  horaRelatorio: z.number().int().min(0).max(23),
+  alertasImediatosAtivos: z.boolean(),
+  limiarInadimplenciaPct: z.number().int().min(1).max(100),
+  canalRelatorio: z.enum(["APENAS_SISTEMA", "WHATSAPP", "EMAIL", "AMBOS"]),
+  emailRemetente: z.string().max(150).nullable(),
+});
+
+export async function guardarRelatoriosIaAction(_prev: EstadoForm, fd: FormData): Promise<EstadoForm> {
+  const { user, db } = await configuracao();
+
+  const r = esquemaRelatoriosIa.safeParse({
+    iaAtiva: fd.get("iaAtiva") === "on",
+    modeloClaude: campo(fd, "modeloClaude") ?? "claude-sonnet-4-20250514",
+    relatorioSemanalAtivo: fd.get("relatorioSemanalAtivo") === "on",
+    diaSemanaRelatorio: inteiro(fd, "diaSemanaRelatorio") ?? 1,
+    relatorioMensalAtivo: fd.get("relatorioMensalAtivo") === "on",
+    diaMesRelatorio: inteiro(fd, "diaMesRelatorio") ?? 1,
+    horaRelatorio: inteiro(fd, "horaRelatorio") ?? 8,
+    alertasImediatosAtivos: fd.get("alertasImediatosAtivos") === "on",
+    limiarInadimplenciaPct: inteiro(fd, "limiarInadimplenciaPct") ?? 20,
+    canalRelatorio: campo(fd, "canalRelatorio") ?? "WHATSAPP",
+    emailRemetente: campo(fd, "emailRemetente"),
+  });
+
+  const erros: Record<string, string> = r.success ? {} : errosZod(r.error);
+
+  const numParsed = parseNumerosEquipa(campo(fd, "destinatariosWhatsappRelatorio"));
+  if (numParsed.invalidos.length > 0) {
+    erros.destinatariosWhatsappRelatorio = `Números inválidos: ${numParsed.invalidos.join(", ")}`;
+  }
+
+  const emailParsed = parseEmailsLista(campo(fd, "destinatariosEmailRelatorio"));
+  if (emailParsed.invalidos.length > 0) {
+    erros.destinatariosEmailRelatorio = `E-mails inválidos: ${emailParsed.invalidos.join(", ")}`;
+  }
+
+  const novaAnthropicKey = campo(fd, "anthropicApiKey");
+  const removerAnthropicKey = fd.get("removerAnthropicApiKey") === "on";
+  if (novaAnthropicKey && novaAnthropicKey.length > 300) {
+    erros.anthropicApiKey = "Chave API demasiado longa.";
+  }
+
+  const novaResendKey = campo(fd, "resendApiKey");
+  const removerResendKey = fd.get("removerResendApiKey") === "on";
+  if (novaResendKey && novaResendKey.length > 300) {
+    erros.resendApiKey = "Chave de e-mail demasiado longa.";
+  }
+
+  if (!r.success || Object.keys(erros).length > 0) {
+    return { erro: "Verifique os campos assinalados.", erros };
+  }
+
+  await db.configuracaoCentro.update({
+    where: { tenantId: user.tenantId },
+    data: {
+      ...r.data,
+      destinatariosWhatsappRelatorio: numParsed.numeros,
+      destinatariosEmailRelatorio: emailParsed.emails,
+      ...(novaAnthropicKey
+        ? { anthropicApiKey: cifrar(novaAnthropicKey) }
+        : removerAnthropicKey
+          ? { anthropicApiKey: null }
+          : {}),
+      ...(novaResendKey
+        ? { resendApiKey: cifrar(novaResendKey) }
+        : removerResendKey
+          ? { resendApiKey: null }
+          : {}),
+    },
+  });
+
+  revalidatePath(CAMINHO);
+  revalidatePath("/inteligencia");
+  return { ok: "Agendamento, destinatários e credenciais de Relatórios IA guardados." };
+}

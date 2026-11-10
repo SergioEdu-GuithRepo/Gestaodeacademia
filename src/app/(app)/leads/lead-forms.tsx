@@ -3,7 +3,7 @@
 import { Check, Copy, UserPlus } from "lucide-react";
 import { useState } from "react";
 import { useFormAcao } from "@/components/form-acao";
-import { Alerta, Button, Field, Textarea } from "@/components/ui";
+import { Alerta, Button, Field, Input, Select, Textarea } from "@/components/ui";
 import type { EstadoForm } from "@/lib/utils";
 
 type Acao = (prev: EstadoForm, fd: FormData) => Promise<EstadoForm>;
@@ -83,6 +83,46 @@ export function NotasLeadForm({ acao, notasIniciais }: { acao: Acao; notasInicia
       </Field>
       <Button type="submit" variante="secundario" disabled={pendente}>
         {pendente ? "A guardar…" : "Guardar notas"}
+      </Button>
+    </form>
+  );
+}
+
+export function InteracaoLeadForm({ acao }: { acao: Acao }) {
+  const { estado, pendente, ref, onSubmit } = useFormAcao(acao, { limparAoGuardar: true });
+  return (
+    <form ref={ref} onSubmit={onSubmit} className="space-y-4 p-5">
+      {estado?.erro && <Alerta>{estado.erro}</Alerta>}
+      {estado?.ok && <Alerta tipo="sucesso">{estado.ok}</Alerta>}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Canal de Contacto" htmlFor="crm-tipo">
+          <Select id="crm-tipo" name="tipo" defaultValue="WHATSAPP">
+            <option value="WHATSAPP">WhatsApp</option>
+            <option value="CHAMADA">Chamada Telefónica</option>
+            <option value="REUNIAO">Atendimento Presencial / Reunião</option>
+            <option value="EMAIL">E-mail</option>
+            <option value="NOTA">Nota Interna</option>
+          </Select>
+        </Field>
+        <Field
+          label="Próximo Follow-up (opcional)"
+          htmlFor="crm-followup"
+          erro={estado?.erros?.proximoFollowUp}
+        >
+          <Input id="crm-followup" name="proximoFollowUp" type="datetime-local" />
+        </Field>
+      </div>
+      <Field label="Resumo da Interação CRM" htmlFor="crm-resumo" erro={estado?.erros?.resumo}>
+        <Textarea
+          id="crm-resumo"
+          name="resumo"
+          rows={3}
+          required
+          placeholder="Ex.: Candidato confirmou interesse na turma de sábado; pediu IBAN para pagar a 1.ª parcela até sexta-feira."
+        />
+      </Field>
+      <Button type="submit" disabled={pendente}>
+        {pendente ? "A registar…" : "Registar contacto no CRM"}
       </Button>
     </form>
   );

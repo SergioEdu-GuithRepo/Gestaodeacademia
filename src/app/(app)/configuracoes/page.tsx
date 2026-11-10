@@ -6,6 +6,7 @@ import { exigir } from "@/lib/auth";
 import { comoCliente, obterConfiguracao } from "@/lib/mensagens/config";
 import { MODELOS_PADRAO, TIPOS_MODELO } from "@/lib/mensagens/modelos";
 import { pode } from "@/lib/rbac";
+import { decifrar, mascarar } from "@/lib/segredos";
 import { cn } from "@/lib/utils";
 import { GestaoUtilizadores } from "../utilizadores/gestao-utilizadores";
 import {
@@ -13,18 +14,22 @@ import {
   enviarMensagemTeste,
   gerarQrCodeWhatsapp,
   guardarAutomacoes,
+  guardarBancariosCertificadosAction,
   guardarFidelizacaoAction,
   guardarModelo,
+  guardarRelatoriosIaAction,
   guardarWhatsapp,
   reporModelo,
   testarLigacao,
 } from "./actions";
 import {
   AutomacoesForm,
+  BancariosCertificadosForm,
   EmparelharWhatsapp,
   EnviarTesteForm,
   FidelizacaoForm,
   ModeloEditor,
+  RelatoriosIaConfigForm,
   WhatsappForm,
 } from "./forms";
 
@@ -33,6 +38,8 @@ export const metadata = { title: "Configurações" };
 const SEPARADORES = [
   { id: "whatsapp", nome: "WhatsApp" },
   { id: "automacoes", nome: "Automações" },
+  { id: "pagamentos", nome: "Bancos e Certificados" },
+  { id: "ia", nome: "Relatórios IA (Claude)" },
   { id: "modelos", nome: "Modelos de Mensagem" },
   { id: "fidelizacao", nome: "Fidelização e Indicação" },
   { id: "utilizadores", nome: "Equipa" },
@@ -199,6 +206,57 @@ export default async function ConfiguracoesPage({ searchParams }: { searchParams
               horaEnvio: cfg.horaEnvio,
               numerosEquipaComercial: cfg.numerosEquipaComercial.join("\n"),
               apresentacaoPublica: cfg.apresentacaoPublica ?? "",
+            }}
+          />
+        </Card>
+      )}
+
+      {atual === "pagamentos" && (
+        <Card>
+          <CardHeader
+            titulo="Dados Bancários (IBAN / Express) e Emissão de Certificados"
+            descricao="Configure as coordenadas bancárias apresentadas no Portal do Formando e a assiduidade mínima exigida para emissão automática de certificados com QR Code."
+          />
+          <BancariosCertificadosForm
+            acao={guardarBancariosCertificadosAction}
+            valores={{
+              bancoNome: cfg.bancoNome ?? "",
+              iban: cfg.iban ?? "",
+              titularConta: cfg.titularConta ?? "",
+              multicaixaExpress: cfg.multicaixaExpress ?? "",
+              minAssiduidadeCertificadoPct: cfg.minAssiduidadeCertificadoPct,
+            }}
+          />
+        </Card>
+      )}
+
+      {atual === "ia" && (
+        <Card>
+          <CardHeader
+            titulo="Relatórios Automáticos IA (Claude) e Alertas de Anomalia"
+            descricao="Defina frequência (semanal, mensal e alertas imediatos), canal de entrega (WhatsApp / E-mail), destinatários e chave API do Claude."
+          />
+          <RelatoriosIaConfigForm
+            acao={guardarRelatoriosIaAction}
+            valores={{
+              iaAtiva: cfg.iaAtiva,
+              temChaveClaudePropria: Boolean(cfg.anthropicApiKey),
+              chaveClaudeMascarada: mascarar(decifrar(cfg.anthropicApiKey)),
+              temChaveClaudeGlobal: Boolean(process.env.ANTHROPIC_API_KEY?.trim()),
+              modeloClaude: cfg.modeloClaude,
+              relatorioSemanalAtivo: cfg.relatorioSemanalAtivo,
+              diaSemanaRelatorio: cfg.diaSemanaRelatorio,
+              relatorioMensalAtivo: cfg.relatorioMensalAtivo,
+              diaMesRelatorio: cfg.diaMesRelatorio,
+              horaRelatorio: cfg.horaRelatorio,
+              alertasImediatosAtivos: cfg.alertasImediatosAtivos,
+              limiarInadimplenciaPct: cfg.limiarInadimplenciaPct,
+              canalRelatorio: cfg.canalRelatorio,
+              destinatariosWhatsappRelatorio: cfg.destinatariosWhatsappRelatorio.join("\n"),
+              destinatariosEmailRelatorio: cfg.destinatariosEmailRelatorio.join("\n"),
+              temChaveEmailPropria: Boolean(cfg.resendApiKey),
+              chaveEmailMascarada: mascarar(decifrar(cfg.resendApiKey)),
+              emailRemetente: cfg.emailRemetente ?? "",
             }}
           />
         </Card>

@@ -1,9 +1,12 @@
 "use server";
 
+import type { EstadoPresenca } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { dbTenant, prisma } from "@/lib/db";
 import { horasSessao } from "@/lib/precos-formador";
 import { campo } from "@/lib/utils";
+
+const ESTADOS_PRESENCA_VALIDOS = new Set<EstadoPresenca>(["PRESENTE", "FALTA", "JUSTIFICADA"]);
 
 export async function confirmarSessaoPortalAction(
   portalToken: string,
@@ -26,6 +29,17 @@ export async function confirmarSessaoPortalAction(
   const db = dbTenant({ tenantId: formador.tenantId });
   const sessao = await db.sessao.findFirst({
     where: { id: sessaoId, formadorId: formador.id },
+    include: {
+      turma: {
+        select: {
+          id: true,
+          matriculas: {
+            where: { estado: { not: "CANCELADA" } },
+            select: { id: true },
+          },
+        },
+      },
+    },
   });
 
   if (!sessao) {
@@ -48,21 +62,62 @@ export async function confirmarSessaoPortalAction(
     return { erro: "O sumário/observações não pode exceder 1000 caracteres." };
   }
 
-  await db.sessao.update({
-    where: { id: sessao.id },
-    data: {
-      estado: "REALIZADA",
-      horasLecionadas: horas.toFixed(2),
-      notas: notas ?? null,
-    },
+  const presencasRegistar: { matriculaId: string; estado: EstadoPresenca }[] = [];
+  for (const mat of sessao.turma.matriculas) {
+    const bruto = campo(fd, `presenca_${mat.id}`);
+    if (!bruto) {
+      presencasRegistar.push({ matriculaId: mat.id, estado: "PRESENTE" });
+      continue;
+    }
+    if (!ESTADOS_PRESENCA_VALIDOS.has(bruto as EstadoPresenca)) {
+      return { erro: "Estado de presença inválido na lista nominal." };
+    }
+    presencasRegistar.push({ matriculaId: mat.id, estado: bruto as EstadoPresenca });
+  }
+
+  await db.$transaction(async (tx) => {
+    await tx.sessao.update({
+      where: { id: sessao.id },
+      data: {
+        estado: "REALIZADA",
+        horasLecionadas: horas.toFixed(2),
+        notas: notas ?? null,
+      },
+    });
+
+    for (const item of presencasRegistar) {
+      await tx.presenca.upsert({
+        where: {
+          sessaoId_matriculaId: {
+            sessaoId: sessao.id,
+            matriculaId: item.matriculaId,
+          },
+        },
+        create: {
+          tenantId: formador.tenantId,
+          sessaoId: sessao.id,
+          matriculaId: item.matriculaId,
+          estado: item.estado,
+        },
+        update: {
+          estado: item.estado,
+        },
+      });
+    }
   });
 
   revalidatePath(`/portal/formador/${portalToken}`);
   revalidatePath("/financeiro");
   revalidatePath(`/formadores/${formador.id}`);
   revalidatePath(`/turmas/${sessao.turmaId}`);
+  revalidatePath("/inteligencia");
   revalidatePath("/agenda");
   revalidatePath("/painel");
 
-  return { ok: "Sessão e horas lecionadas confirmadas com sucesso." };
+  return {
+    ok:
+      presencasRegistar.length > 0
+        ? "Sessão, horas lecionadas e chamada nominal guardadas com sucesso."
+        : "Sessão e horas lecionadas confirmadas com sucesso.",
+  };
 }

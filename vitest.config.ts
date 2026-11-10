@@ -7,7 +7,9 @@ export default defineConfig({
     include: ["tests/**/*.test.ts"],
     environment: "node",
     env: { TZ: "UTC" },
-    // Testes de integração partilham a BD local; correr em série evita interferências
+    // Testes de integração partilham a BD; correr em série evita interferências e timeouts suportam BD remota (Neon)
     fileParallelism: false,
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
   },
 });

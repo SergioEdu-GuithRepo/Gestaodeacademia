@@ -41,6 +41,10 @@ const MATRIZ = {
 
   "mensagens:ver": ["ADMIN", "COMERCIAL", "FINANCEIRO"],
   "mensagens:gerir": ["ADMIN", "COMERCIAL", "FINANCEIRO"],
+
+  "certificados:gerir": ["ADMIN", "PEDAGOGICO"],
+  "inteligencia:ver": ["ADMIN", "COMERCIAL", "PEDAGOGICO", "FINANCEIRO"],
+  "inteligencia:gerar": ["ADMIN"],
 } as const satisfies Record<string, readonly Perfil[]>;
 
 export type Permissao = keyof typeof MATRIZ;

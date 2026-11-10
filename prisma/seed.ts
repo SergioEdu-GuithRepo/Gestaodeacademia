@@ -19,6 +19,11 @@ async function limparTenant(slug: string) {
   if (!t) return;
   const w = { where: { tenantId: t.id } };
   await prisma.mensagem.deleteMany(w);
+  await prisma.relatorioIA.deleteMany(w);
+  await prisma.interacaoLead.deleteMany(w);
+  await prisma.avisoPagamento.deleteMany(w);
+  await prisma.certificado.deleteMany(w);
+  await prisma.presenca.deleteMany(w);
   await prisma.movimentoPontos.deleteMany(w);
   await prisma.campanha.deleteMany(w);
   await prisma.despesa.deleteMany(w);
@@ -300,6 +305,15 @@ async function main() {
       numerosEquipaComercial: ["+244923000900"],
       apresentacaoPublica:
         "Formações práticas em Luanda, em horário pós-laboral, com formadores certificados e turmas reduzidas.",
+      bancoNome: "Banco BAI",
+      iban: "AO06 0040 0000 3421 8910 1019 2",
+      titularConta: "Academia Demo Luanda, Lda.",
+      multicaixaExpress: "+244 923 000 900",
+      minAssiduidadeCertificadoPct: 75,
+      iaAtiva: true,
+      canalRelatorio: "AMBOS",
+      destinatariosWhatsappRelatorio: ["+244923000900"],
+      destinatariosEmailRelatorio: ["admin@demo.ao"],
     },
   });
   await prisma.configuracaoCentro.create({ data: { tenantId: outro.id, whatsappModo: "DESATIVADO" } });

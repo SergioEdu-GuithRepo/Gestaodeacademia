@@ -1,12 +1,17 @@
 "use server";
 
+import { type EstadoPresenca, Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { eErroConflitoBD, procurarConflitos, validarIntervalo, type Conflito } from "@/lib/agenda";
 import { exigir } from "@/lib/auth";
-import { instanteLocal } from "@/lib/datas";
+import { gerarCodigoCertificado, verificarElegibilidadeCertificado } from "@/lib/certificados";
+import { dataSimples, hojeLocal, instanteLocal } from "@/lib/datas";
+import { comoCliente, obterConfiguracao } from "@/lib/mensagens/config";
 import { parseKz } from "@/lib/money";
+import { comPago, resumirParcelas } from "@/lib/parcelas";
+import { calcularAssiduidade } from "@/lib/presencas";
 import { campo, type EstadoForm } from "@/lib/utils";
 
 // ─────────────────────────────── Turmas ────────────────────────────────────
@@ -56,6 +61,22 @@ export async function guardarTurma(_prev: EstadoForm, fd: FormData): Promise<Est
   try {
     if (id) {
       await db.turma.update({ where: { id }, data: dados });
+      if (r.data.estado === "CONCLUIDA") {
+        const matriculasAtivas = await db.matricula.findMany({
+          where: { turmaId: id, estado: "ATIVA" },
+          include: { parcelas: { include: { alocacoes: { select: { valor: true } } } } },
+        });
+        const hoje = dataSimples(hojeLocal());
+        const aptasIds = matriculasAtivas
+          .filter((m) => resumirParcelas(m.parcelas.map(comPago), hoje).divida <= 0n)
+          .map((m) => m.id);
+        if (aptasIds.length > 0) {
+          await db.matricula.updateMany({
+            where: { id: { in: aptasIds } },
+            data: { estado: "CONCLUIDA" },
+          });
+        }
+      }
     } else {
       turmaId = (await db.turma.create({ data: { ...dados, tenantId: user.tenantId } })).id;
     }
@@ -66,6 +87,7 @@ export async function guardarTurma(_prev: EstadoForm, fd: FormData): Promise<Est
     throw e;
   }
   revalidatePath("/turmas");
+  revalidatePath("/formandos");
   redirect(`/turmas/${turmaId}`);
 }
 
@@ -243,4 +265,239 @@ export async function apagarSessao(fd: FormData) {
   await db.sessao.delete({ where: { id: sessaoId } });
   revalidatePath(`/turmas/${sessao.turmaId}`);
   revalidatePath("/agenda");
+}
+
+// ─────────────────────── Assiduidade Nominal & Certificados ──────────────────
+
+const ESTADOS_PRESENCA_VALIDOS: readonly EstadoPresenca[] = ["PRESENTE", "FALTA", "JUSTIFICADA"] as const;
+
+export async function registarChamadaSessaoAction(
+  turmaId: string,
+  sessaoId: string,
+  _prev: EstadoForm,
+  fd: FormData,
+): Promise<EstadoForm> {
+  const { user, db } = await exigir("agenda:editar");
+
+  const sessao = await db.sessao.findFirst({
+    where: { id: sessaoId, turmaId },
+    include: {
+      turma: {
+        select: {
+          id: true,
+          matriculas: {
+            where: { estado: { not: "CANCELADA" } },
+            select: { id: true, formandoId: true },
+          },
+        },
+      },
+    },
+  });
+
+  if (!sessao) return { erro: "Sessão não encontrada." };
+  if (sessao.estado === "CANCELADA") {
+    return { erro: "Não é possível lançar chamada numa sessão cancelada." };
+  }
+
+  const marcarRealizada = fd.get("marcarRealizada") === "on" || campo(fd, "marcarRealizada") === "1";
+  const duracaoPadrao = Math.max(0.5, (sessao.fim.getTime() - sessao.inicio.getTime()) / 3_600_000);
+  const horasTxt = campo(fd, "horasLecionadas");
+  let horasCalculadas = duracaoPadrao;
+
+  if (horasTxt) {
+    const num = Number(horasTxt.replace(",", "."));
+    if (!Number.isFinite(num) || num <= 0 || num > 24) {
+      return { erros: { horasLecionadas: "Indique um número de horas válido (entre 0,5 e 24 h)." } };
+    }
+    horasCalculadas = num;
+  } else if (sessao.horasLecionadas !== null) {
+    horasCalculadas = Number(sessao.horasLecionadas);
+  }
+
+  const notasSessao = campo(fd, "notasSessao");
+  if (notasSessao && notasSessao.length > 1000) {
+    return { erros: { notasSessao: "O sumário da aula não pode exceder 1000 caracteres." } };
+  }
+
+  const registos = sessao.turma.matriculas.map((m) => {
+    const estadoBruto = campo(fd, `estado_${m.id}`) ?? "PRESENTE";
+    const estado: EstadoPresenca = ESTADOS_PRESENCA_VALIDOS.includes(estadoBruto as EstadoPresenca)
+      ? (estadoBruto as EstadoPresenca)
+      : "PRESENTE";
+    const obs = campo(fd, `obs_${m.id}`);
+    return {
+      matriculaId: m.id,
+      estado,
+      observacao: obs ? obs.slice(0, 300) : null,
+    };
+  });
+
+  await db.$transaction(async (tx) => {
+    const existentes = await tx.presenca.findMany({
+      where: { sessaoId: sessao.id },
+      select: { id: true, matriculaId: true },
+    });
+    const mapaExistentes = new Map(existentes.map((p) => [p.matriculaId, p.id]));
+
+    for (const r of registos) {
+      const idExistente = mapaExistentes.get(r.matriculaId);
+      if (idExistente) {
+        await tx.presenca.update({
+          where: { id: idExistente },
+          data: { estado: r.estado, observacao: r.observacao },
+        });
+      } else {
+        await tx.presenca.create({
+          data: {
+            tenantId: user.tenantId,
+            sessaoId: sessao.id,
+            matriculaId: r.matriculaId,
+            estado: r.estado,
+            observacao: r.observacao,
+          },
+        });
+      }
+    }
+
+    if (marcarRealizada || sessao.estado === "REALIZADA" || notasSessao !== null) {
+      await tx.sessao.update({
+        where: { id: sessao.id },
+        data: {
+          ...(marcarRealizada ? { estado: "REALIZADA", horasLecionadas: horasCalculadas.toFixed(2) } : {}),
+          ...(sessao.estado === "REALIZADA" && horasTxt ? { horasLecionadas: horasCalculadas.toFixed(2) } : {}),
+          ...(fd.has("notasSessao") ? { notas: notasSessao } : {}),
+        },
+      });
+    }
+  });
+
+  revalidatePath(`/turmas/${turmaId}`);
+  revalidatePath(`/turmas/${turmaId}/sessoes/${sessaoId}`);
+  revalidatePath(`/turmas/${turmaId}/folha-presencas`);
+  revalidatePath("/agenda");
+  revalidatePath("/financeiro");
+  revalidatePath("/painel");
+  revalidatePath("/formandos");
+
+  return {
+    ok:
+      marcarRealizada && sessao.estado !== "REALIZADA"
+        ? "Chamada nominal guardada e sessão confirmada como realizada."
+        : "Chamada nominal guardada com sucesso.",
+  };
+}
+
+export async function emitirCertificadoInternoAction(
+  turmaId: string,
+  matriculaId: string,
+): Promise<{ ok?: string; erro?: string; codigo?: string }> {
+  const { user, db } = await exigir("certificados:gerir");
+
+  const matricula = await db.matricula.findFirst({
+    where: { id: matriculaId, turmaId },
+    include: {
+      formando: { select: { id: true, nome: true } },
+      certificado: true,
+      parcelas: { include: { alocacoes: { select: { valor: true } } } },
+      turma: {
+        include: {
+          formacao: { select: { cargaHoraria: true } },
+          sessoes: {
+            where: { estado: { not: "CANCELADA" } },
+            include: { presencas: { select: { matriculaId: true, estado: true } } },
+          },
+        },
+      },
+    },
+  });
+
+  if (!matricula) return { erro: "Matrícula não encontrada." };
+
+  if (matricula.certificado && !matricula.certificado.revogadoEm) {
+    return { ok: "Certificado já se encontra emitido.", codigo: matricula.certificado.codigo };
+  }
+
+  const hoje = dataSimples(hojeLocal());
+  const resumo = resumirParcelas(matricula.parcelas.map(comPago), hoje);
+
+  let estadoMatricula = matricula.estado;
+  if (estadoMatricula === "ATIVA" && matricula.turma.estado === "CONCLUIDA" && resumo.divida <= 0n) {
+    await db.matricula.update({
+      where: { id: matricula.id },
+      data: { estado: "CONCLUIDA" },
+    });
+    estadoMatricula = "CONCLUIDA";
+  }
+
+  const assiduidade = calcularAssiduidade(
+    matricula.turma.sessoes.map((s) => ({
+      id: s.id,
+      inicio: s.inicio,
+      estado: s.estado,
+      temChamadaLancada: s.presencas.length > 0,
+      estadoAluno: s.presencas.find((p) => p.matriculaId === matricula.id)?.estado ?? null,
+    })),
+  );
+
+  const cfg = await obterConfiguracao(comoCliente(db), user.tenantId);
+  const elegibilidade = verificarElegibilidadeCertificado({
+    estadoMatricula,
+    dividaCentimos: resumo.divida,
+    assiduidadePct: assiduidade.assiduidadePct,
+    minAssiduidadePct: cfg.minAssiduidadeCertificadoPct,
+    revogado: Boolean(matricula.certificado?.revogadoEm),
+  });
+
+  if (!elegibilidade.elegivel) {
+    return { erro: elegibilidade.motivosBloqueio.join(" ") };
+  }
+
+  let codigoEmitido = "";
+  for (let tentativa = 0; tentativa < 5; tentativa++) {
+    const codigo = gerarCodigoCertificado();
+    try {
+      await db.certificado.create({
+        data: {
+          tenantId: user.tenantId,
+          matriculaId: matricula.id,
+          codigo,
+          cargaHoraria: matricula.turma.formacao.cargaHoraria,
+          assiduidadePct: assiduidade.assiduidadePct,
+          emitidoPorId: user.id,
+        },
+      });
+      codigoEmitido = codigo;
+      break;
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002" && tentativa < 4) {
+        const jaExiste = await db.certificado.findFirst({ where: { matriculaId: matricula.id } });
+        if (jaExiste) {
+          codigoEmitido = jaExiste.codigo;
+          break;
+        }
+        continue;
+      }
+      throw e;
+    }
+  }
+
+  revalidatePath(`/turmas/${turmaId}`);
+  revalidatePath(`/turmas/${turmaId}/folha-presencas`);
+  revalidatePath(`/formandos/${matricula.formando.id}`);
+  revalidatePath(`/formandos/${matricula.formando.id}/certificado/${matricula.id}`);
+
+  return { ok: "Certificado emitido com sucesso.", codigo: codigoEmitido };
+}
+
+export async function concluirMatriculaPedagogicaAction(turmaId: string, matriculaId: string): Promise<void> {
+  const { db } = await exigir("agenda:editar");
+  const m = await db.matricula.findFirst({
+    where: { id: matriculaId, turmaId },
+    select: { id: true, estado: true, formandoId: true },
+  });
+  if (!m || m.estado !== "ATIVA") return;
+  await db.matricula.update({ where: { id: m.id }, data: { estado: "CONCLUIDA" } });
+  revalidatePath(`/turmas/${turmaId}`);
+  revalidatePath(`/turmas/${turmaId}/folha-presencas`);
+  revalidatePath(`/formandos/${m.formandoId}`);
 }

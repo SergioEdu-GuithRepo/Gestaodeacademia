@@ -4,7 +4,7 @@ import { NextResponse, type NextRequest } from "next/server";
  * Proteção leve: sem cookie de sessão → login. A validação real da sessão e
  * das permissões é feita no servidor (`exigir()` em cada página/action).
  */
-const PUBLICAS = ["/login", "/plataforma", "/portal"];
+const PUBLICAS = ["/login", "/plataforma", "/portal", "/verificar"];
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -20,8 +20,8 @@ export function middleware(req: NextRequest) {
 
 export const config = {
   // Exclui ficheiros estáticos, as landing pages públicas (/p/…), os portais (/portal/…),
-  // o cron da Vercel (/api/cron/…) e os webhooks (autenticados pelo token secreto no URL).
+  // a verificação pública de certificados (/verificar/…), o cron da Vercel (/api/cron/…) e os webhooks.
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|login-editorial\\.jpg|p/|portal/|api/health|api/cron/|api/webhooks/).*)",
+    "/((?!_next/static|_next/image|favicon.ico|login-editorial\\.jpg|p/|portal/|verificar/|api/health|api/cron/|api/webhooks/).*)",
   ],
 };
